@@ -69,22 +69,13 @@ dsh plugin --profile web remove dsh-web-search-ddg
 
 切换两侧都不删除任何东西：已发布的 `web-search-deepseek` 行保持挂载，因此 DeepSeek 后端仍然注册且可用。
 
-### 构建脚本的陷阱
+### 为何不需要构建许可
 
-本地目录安装不需要任何构建许可：`lib/` 以预构建形式随包发布，而 `link:` 依赖不会运行生命周期脚本。
+`lib/` 以预构建形式随仓库发布——它被纳入版本控制，而不是在安装时生成——且本包不声明 `prepare` 脚本，因此从 GitHub 源、本地路径或 tarball 安装都不会执行本包的构建。无需添加任何 `allowBuilds` 条目，安装时也不会有任何生命周期脚本在你的机器上运行。
 
-但它确实需要插件**自己**的 `node_modules`。`link:` 安装是一个符号链接，而 Node 按模块的**真实**路径解析它的导入——因此 `cheerio` 与 `@deepseek-ai/schemastery` 会在插件目录中查找，而不是在 profile 的 `node_modules` 中。请在插件目录里运行一次 `pnpm install`；`lib/` 已纳入版本控制所以不会触发构建，但删除 `node_modules` 又跳过安装会让提供方在加载时以 `ERR_MODULE_NOT_FOUND` 失败。
+本地目录安装是 `link:` 依赖，同样不会运行生命周期脚本。但它确实需要插件**自己**的 `node_modules`：符号链接按模块的**真实**路径解析它的导入，因此 `cheerio` 与 `@deepseek-ai/schemastery` 会在插件目录中查找，而不是在 profile 的 `node_modules` 中。请在插件目录里运行一次 `pnpm install`——`lib/` 已纳入版本控制所以不会触发构建——但删除 `node_modules` 又跳过安装会让提供方在加载时以 `ERR_MODULE_NOT_FOUND` 失败。
 
-从 GitHub 源安装即上面的默认方式，它与本地目录安装不同——pnpm 拉取的是源码而非构建产物，随后运行包的 `prepare` 脚本构建 `lib/`，而 pnpm ≥ 10 在未显式允许前拒绝运行 git 依赖的 `prepare`。把 pnpm 打印的精确键加入 profile 的 `pnpm-workspace.yaml`，然后重跑 `add`：
-
-```yaml
-allowBuilds:
-  dsh-web-search-ddg: true
-```
-
-把这视为在 agent 所运行的任何沙箱之外、于安装时在你机器上执行本包代码的许可。若不愿授予，优先使用本地路径或 tarball；若授予，请固定提交（`github:korosu/dsh-web-search-ddg#<sha>`）。
-
-若在 `pnpm build` 之后才打包，tarball 无需任何许可——`lib/` 已经在里面了。
+若要固定所装内容，请固定提交（`github:korosu/dsh-web-search-ddg#<sha>`）；GitHub Release 附带的 tarball 与该提交携带同一份预构建 `lib/`。
 
 ## 配置
 

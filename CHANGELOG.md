@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-10-08
+
+### Changed
+
+- Dropped the `prepare` script. `lib/` is committed rather than generated, so a
+  build at install time only rebuilt identical output — and pnpm ≥ 10 blocks a
+  git dependency's `prepare` until the package is added to `allowBuilds`, which
+  forced every user installing from a GitHub source to edit their profile's
+  `pnpm-workspace.yaml` first. Installing from a GitHub source, a local path,
+  or a release tarball now runs no lifecycle script at all. `prepack` still
+  builds, so packed tarballs stay self-contained.
+
 ## [0.1.2] - 2026-10-08
 
 ### Fixed

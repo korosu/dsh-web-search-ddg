@@ -69,22 +69,13 @@ or keep the bundle installed and restore the shipped backend in the profile's ow
 
 Nothing is deleted on either side of the switch: the shipped `web-search-deepseek` row stays mounted, so the DeepSeek backend remains registered and usable.
 
-### The build-script catch
+### Why no build permission is needed
 
-A local directory install needs no build permission: `lib/` ships prebuilt and a `link:` dependency does not run lifecycle scripts.
+`lib/` ships prebuilt in the repository — it is committed, not generated at install time — and the package declares no `prepare` script, so installing from a GitHub source, a local path, or a tarball never executes a build for this package. There is no `allowBuilds` entry to add and no lifecycle script runs on your machine at install time.
 
-It does, however, need the plugin's own `node_modules`. A `link:` install is a symlink, and Node resolves a module's imports from that module's *real* path — so `cheerio` and `@deepseek-ai/schemastery` are looked up in the plugin directory, not in the profile's `node_modules`. Run `pnpm install` in the plugin directory once; `lib/` is committed so no build follows, but deleting `node_modules` and skipping the install breaks the provider at load time with `ERR_MODULE_NOT_FOUND`.
+A local directory install is a `link:` dependency, which does not run lifecycle scripts either. It does, however, need the plugin's own `node_modules`: a symlink resolves a module's imports from that module's *real* path, so `cheerio` and `@deepseek-ai/schemastery` are looked up in the plugin directory, not in the profile's `node_modules`. Run `pnpm install` in the plugin directory once — `lib/` is committed, so no build follows — but deleting `node_modules` and skipping the install breaks the provider at load time with `ERR_MODULE_NOT_FOUND`.
 
-Installing from a GitHub source is the default above, and it is different from a local directory: pnpm fetches sources rather than built artifacts and then runs the package's `prepare` script to build `lib/`, but pnpm ≥ 10 refuses to run a git dependency's `prepare` until it is explicitly allowed. Add the exact key pnpm prints to the profile's `pnpm-workspace.yaml`, then re-run the `add`:
-
-```yaml
-allowBuilds:
-  dsh-web-search-ddg: true
-```
-
-Treat that as permission to execute this package's code on your machine at install time, outside any sandbox the agent runs under. Prefer a local path or a tarball when you would rather not grant it; pin a commit (`github:korosu/dsh-web-search-ddg#<sha>`) if you do.
-
-A tarball needs no allowance if it was packed after `pnpm build` — `lib/` is already inside it.
+To pin what you install, pin a commit (`github:korosu/dsh-web-search-ddg#<sha>`); the tarball attached to a GitHub release carries the same prebuilt `lib/` as that commit.
 
 ## Configuration
 
