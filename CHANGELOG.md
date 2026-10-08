@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-10-08
+
+### Added
+
+- Failure budget (circuit breaker): transport failures, unreadable bodies,
+  HTTP 403/429/5xx, and the DDG anomaly page (HTTP 202 with no result markup)
+  now count as transient failures; after `failureThreshold` (default 3)
+  consecutive ones the provider reports itself unavailable for `cooldownMs`
+  (default 5 min) so the seam can route to another backend, and any success
+  resets the counter. The anomaly page previously parsed to an empty result,
+  which made throttling indistinguishable from a genuinely empty query — it
+  now raises a `WEB_PROVIDER_ERROR` naming the anomaly page.
+- Config keys `failureThreshold` and `cooldownMs` for the budget, validated as
+  positive integers like the existing numeric keys.
+- `dsh.compatibility.dshReleases` catalog metadata (dsh 0.2.0-rc.1, 0.2.0-rc.2,
+  0.2.1-alpha.1) for plugin registries; the runtime does not read it.
+- `pnpm compat` (`scripts/compat-matrix.sh`): installs each seam version in a
+  throwaway project with the cordis that line itself wants, typechecks and
+  runs the offline suite against it, and reports whether the version is
+  inside the declared peer range.
+- Release assets now carry a stable name (`dsh-web-search-ddg.tgz`), so the
+  tarball installs from a version-independent URL:
+  `dsh plugin add .../releases/latest/download/dsh-web-search-ddg.tgz`.
+- README: selecting a provider through `$DSH_WEB_SEARCH_PROVIDER`, the
+  profile-level `peerDependencyRules.ignoreMissing` recipe, and a Version
+  compatibility section with the verification level of each claimed release.
+
+### Changed
+
+- Peer range narrowed and made evidence-based: `@deepseek-ai/dsh-web`
+  `^0.2.0-rc.1 || ^0.2.1-alpha.1` (was `^0.1.2-rc.1 || ^0.2.0-rc.1`) — the
+  0.1.x claim was never verified and the bundle's base-row override depended
+  on loader behavior that was buggy there (`duplicate loader entry id: web`,
+  fixed in dsh 0.1.4). The cordis peer gained a parallel clause
+  (`~4.0.4 || ~4.0.5-alpha.1`) because `~4.0.4` cannot semver-match the
+  `4.0.5-alpha.1` that the 0.2.1-alpha seam ships.
+
 ## [0.1.3] - 2026-10-08
 
 ### Changed

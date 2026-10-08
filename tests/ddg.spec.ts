@@ -251,10 +251,85 @@ describe('DdgSearchProvider error handling', () => {
     )
   })
 
-  it('treats a 202 challenge/anomaly page as an empty result, not an error', async () => {
+  it('treats a 202 anomaly page with no markup as a transient failure', async () => {
     stubFetch(async () => new Response('anomaly', { status: 202 }))
+    await assert.rejects(
+      new DdgSearchProvider(options).search({ query: 'q' }),
+      rejectsWithCode('WEB_PROVIDER_ERROR', /anomaly page/),
+    )
+  })
+
+  it('keeps a 200 page without rows an empty result rather than a failure', async () => {
+    stubFetch(async () => new Response('<html><body>no rows</body></html>', { status: 200 }))
     const result = await new DdgSearchProvider(options).search({ query: 'q' })
     assert.deepEqual(result, { sources: [], truncated: false })
+  })
+
+  it('does not count a non-retriable 4xx toward the failure budget', async () => {
+    stubFetch(async () => new Response('bad request', { status: 400 }))
+    const provider = new DdgSearchProvider({ ...options, failureThreshold: 1, cooldownMs: 60_000 })
+    for (let i = 0; i < 3; i++) {
+      await assert.rejects(
+        provider.search({ query: 'q' }),
+        rejectsWithCode('WEB_PROVIDER_ERROR', /does not count toward the failure budget/),
+      )
+    }
+    assert.equal(provider.available(), true)
+  })
+
+  it('counts a 403 toward the failure budget', async () => {
+    stubFetch(async () => new Response('forbidden', { status: 403 }))
+    const provider = new DdgSearchProvider({ ...options, failureThreshold: 2, cooldownMs: 60_000 })
+    await assert.rejects(provider.search({ query: 'q' }), rejectsWithCode('WEB_PROVIDER_ERROR'))
+    assert.equal(provider.available(), true)
+    await assert.rejects(provider.search({ query: 'q' }), rejectsWithCode('WEB_PROVIDER_ERROR'))
+    assert.equal(provider.available(), false, 'threshold reached → cooldown')
+  })
+
+  it('goes on cooldown after the configured threshold and recovers after it', async () => {
+    let now = 1_000_000
+    const realNow = Date.now
+    Date.now = () => now
+    try {
+      stubFetch(async () => { throw new TypeError('connection refused') })
+      const provider = new DdgSearchProvider({ ...options, failureThreshold: 3, cooldownMs: 5 * 60 * 1000 })
+      for (let i = 0; i < 2; i++) {
+        await assert.rejects(provider.search({ query: 'q' }), rejectsWithCode('WEB_PROVIDER_ERROR'))
+        assert.equal(provider.available(), true, `still available after ${i + 1} failures`)
+      }
+      await assert.rejects(provider.search({ query: 'q' }), rejectsWithCode('WEB_PROVIDER_ERROR'))
+      assert.equal(provider.available(), false, 'third failure opens the cooldown')
+
+      // The seam asks available() before each search; once the cooldown elapses
+      // the provider is usable again and starts a fresh window.
+      now += 5 * 60 * 1000 + 1
+      assert.equal(provider.available(), true)
+      stubFetch(async () => htmlResponse(resultsPage()))
+      const result = await provider.search({ query: 'q' })
+      assert.equal(result.sources.length, 2)
+    } finally {
+      Date.now = realNow
+    }
+  })
+
+  it('clears the failure count after a success', async () => {
+    stubFetch(async () => { throw new TypeError('connection refused') })
+    const provider = new DdgSearchProvider({ ...options, failureThreshold: 2, cooldownMs: 60_000 })
+    await assert.rejects(provider.search({ query: 'q' }), rejectsWithCode('WEB_PROVIDER_ERROR'))
+    stubFetch(async () => htmlResponse(resultsPage()))
+    await provider.search({ query: 'q' })
+    stubFetch(async () => { throw new TypeError('connection refused') })
+    await assert.rejects(provider.search({ query: 'q' }), rejectsWithCode('WEB_PROVIDER_ERROR'))
+    assert.equal(provider.available(), true, 'the earlier failure was cleared by the success')
+  })
+
+  it('does not count an abort toward the failure budget', async () => {
+    stubFetch(async () => { throw new DOMException('aborted', 'AbortError') })
+    const provider = new DdgSearchProvider({ ...options, failureThreshold: 1, cooldownMs: 60_000 })
+    for (let i = 0; i < 3; i++) {
+      await assert.rejects(provider.search({ query: 'q' }), rejectsWithCode('WEB_ABORTED'))
+    }
+    assert.equal(provider.available(), true)
   })
 
   it('maps a network failure to WEB_PROVIDER_ERROR', async () => {

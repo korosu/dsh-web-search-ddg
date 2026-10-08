@@ -31,12 +31,24 @@ export const DDG_DEFAULT_ENDPOINT = 'https://html.duckduckgo.com/html/'
 /** Desktop Chrome user agent — the static endpoint serves richer results to it. */
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
 
+/**
+ * Consecutive transient failures after which the provider declares itself
+ * unavailable, and how long that cooldown lasts. Both are config keys; these
+ * are the defaults.
+ */
+const FAILURE_THRESHOLD = 3
+const COOLDOWN_MS = 5 * 60 * 1000
+
 /** Resolved provider options (the plugin's `apply` supplies defaults). */
 export interface DdgSearchProviderOptions {
   /** Results endpoint; `?q=` is appended. Must be an absolute http/https URL. */
   endpoint: string
   /** Default result limit when a request carries no `maxResults`. */
   maxResults?: number
+  /** Consecutive transient failures before the provider goes on cooldown. */
+  failureThreshold?: number
+  /** Cooldown length in milliseconds once the threshold is reached. */
+  cooldownMs?: number
 }
 
 /**
@@ -131,22 +143,54 @@ function isAbortError(error: unknown): boolean {
 }
 
 /**
+ * True for an HTTP status a retry could plausibly survive: rate limiting,
+ * blocking, server errors. Every other 4xx is a configuration mistake that
+ * would fail identically on each retry, so it must not consume the failure
+ * budget (see {@link DdgSearchProvider}).
+ */
+function isTransientStatus(status: number): boolean {
+  return status === 403 || status === 429 || status >= 500
+}
+
+/**
  * The DuckDuckGo scrape search provider. HTTP redirects are followed by the
  * native fetch (the endpoint 301s between the bare domain and the `html/`
  * path); a result hop is never followed — it is decoded from the markup instead
- * of fetched. Fetch/HTTP failures surface as `WEB_PROVIDER_ERROR`.
+ * of fetched.
+ *
+ * Failures are split in two. Transport failures, unreadable bodies, HTTP 429 /
+ * 403 / 5xx, and an anomaly page (HTTP 202 carrying no result markup) are
+ * *transient*: they count toward a failure budget, and once the budget is spent
+ * the provider reports itself unavailable for a cooldown so the seam can pick
+ * another backend instead of failing every call. Any other 4xx is a
+ * configuration error, fails identically on every retry, and is never counted.
  */
 export class DdgSearchProvider implements WebSearchProvider {
   readonly id = DDG_PROVIDER_ID
 
   private readonly options: DdgSearchProviderOptions
+  private readonly failureThreshold: number
+  private readonly cooldownMs: number
+  private failures = 0
+  private cooldownUntil = 0
 
   constructor(options: DdgSearchProviderOptions) {
     this.options = options
+    this.failureThreshold = options.failureThreshold ?? FAILURE_THRESHOLD
+    this.cooldownMs = options.cooldownMs ?? COOLDOWN_MS
   }
 
-  /** Cheap local usability check; must not make network calls. */
+  /**
+   * Cheap local usability check; must not make network calls. False while the
+   * failure-budget cooldown is open, so the seam can select another provider.
+   */
   available(): boolean {
+    if (this.cooldownUntil !== 0) {
+      if (Date.now() < this.cooldownUntil) return false
+      // Cooldown elapsed: start a fresh window rather than staying tripped.
+      this.failures = 0
+      this.cooldownUntil = 0
+    }
     return URL.canParse(this.options.endpoint)
       && (this.options.endpoint.startsWith('http://') || this.options.endpoint.startsWith('https://'))
       && (this.options.maxResults === undefined || isPositiveInteger(this.options.maxResults))
@@ -164,11 +208,17 @@ export class DdgSearchProvider implements WebSearchProvider {
       })
     } catch (error: unknown) {
       if (signal?.aborted === true || isAbortError(error)) throw webAborted(signal, error)
-      throw new WebError(`DuckDuckGo search request failed: ${String(error)}`, 'WEB_PROVIDER_ERROR', { cause: error })
+      throw this.transientFailure(`DuckDuckGo search request failed: ${String(error)}`, error)
     }
 
     if (!response.ok) {
-      throw new WebError(`DuckDuckGo returned an error response (HTTP ${response.status})`, 'WEB_PROVIDER_ERROR')
+      const message = `DuckDuckGo returned an error response (HTTP ${response.status})`
+      if (!isTransientStatus(response.status)) {
+        // A configuration error: same outcome on every retry, so it must not
+        // consume the failure budget and trip the breaker.
+        throw new WebError(`${message}; this status is not retried and does not count toward the failure budget`, 'WEB_PROVIDER_ERROR')
+      }
+      throw this.transientFailure(message)
     }
 
     let html: string
@@ -176,12 +226,35 @@ export class DdgSearchProvider implements WebSearchProvider {
       html = await response.text()
     } catch (error: unknown) {
       if (signal?.aborted === true || isAbortError(error)) throw webAborted(signal, error)
-      throw new WebError(`DuckDuckGo returned an unreadable response body: ${String(error)}`, 'WEB_PROVIDER_ERROR', { cause: error })
+      throw this.transientFailure(`DuckDuckGo returned an unreadable response body: ${String(error)}`, error)
     }
 
     // provider-side bound: wins as a cost optimization; the seam caps regardless.
     const limit = request.maxResults ?? this.options.maxResults
-    return mapEntries(parseResults(html, limit))
+    const entries = parseResults(html, limit)
+
+    // An anomaly page is a 2xx carrying no result markup. A 200 with no rows is
+    // a genuinely empty query and stays an empty result; only the anomaly
+    // signature counts as a failure, so throttling is distinguishable.
+    if (entries.length === 0 && response.status === 202) {
+      throw this.transientFailure('DuckDuckGo answered with an anomaly page (HTTP 202) carrying no result markup; the endpoint is likely rate-limiting or challenging this client')
+    }
+
+    this.failures = 0
+    return mapEntries(entries)
+  }
+
+  /**
+   * Record a transient failure and throw the provider error for it. Once the
+   * configured threshold of consecutive failures is reached the provider goes
+   * on cooldown and reports itself unavailable until it elapses.
+   */
+  private transientFailure(message: string, cause?: unknown): WebError {
+    this.failures += 1
+    if (this.failures >= this.failureThreshold) {
+      this.cooldownUntil = Date.now() + this.cooldownMs
+    }
+    return new WebError(message, 'WEB_PROVIDER_ERROR', cause === undefined ? undefined : { cause })
   }
 }
 

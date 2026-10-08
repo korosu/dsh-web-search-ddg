@@ -19,7 +19,9 @@ else. A few rules follow from that, and they are enforced by review:
 - **Never invent fields.** A blank title drops the row; a blank snippet is
   omitted rather than set empty. The seam must not be handed a fabricated value.
 - **No silent fallback.** Selection is the seam's job. This package never
-  substitutes another engine when DDG misbehaves.
+  substitutes another engine when DDG misbehaves; the failure budget's job is
+  the opposite — to make the provider *step aside* (`available()` false for
+  the cooldown) so the seam gets to select, never to pick anything itself.
 - **Selection stays with the seam.** This package registers a provider; it does
   not pin, override, or replace `WebRuntime` or the model-facing tool beyond the
   bundle's single documented `web` row.
@@ -31,10 +33,11 @@ support, with no bundler); Node 24 is recommended. `pnpm` 11 manages the install
 
 ```bash
 pnpm install
-pnpm test                # 36 tests, offline (fetch is stubbed)
+pnpm test                # 42 tests, offline (fetch is stubbed)
 DDG_E2E=1 pnpm test:e2e  # optional real-network smoke
 pnpm typecheck
 pnpm peers check         # peer-range sanity against the installed seam line
+pnpm compat              # seam-version matrix; needs bash + registry access
 ```
 
 ## The `lib/` rule
@@ -61,4 +64,6 @@ limitation rather than leaving stale caveats behind.
 - CI must be green: `typecheck`, `peers check`, `test`, and the `lib/` sync
   guard.
 - Keep the peer range of `@deepseek-ai/dsh-web` honest — verify against a new
-  seam line before widening the range, not after.
+  seam line before widening the range, not after. `pnpm compat <version>` is
+  the verification tool; extend the declared range, `dshReleases`, and the
+  README compatibility table in the same PR as the evidence.

@@ -42,8 +42,15 @@ jobs:
       - name: pack tarball
         run: pnpm pack
 
+      # A stable asset name lets users install the latest release without
+      # knowing its version:
+      #   dsh plugin add https://github.com/korosu/dsh-web-search-ddg/releases/latest/download/dsh-web-search-ddg.tgz
+      # Pinning stays possible through the tag URL (releases/download/v0.1.4/...).
+      - name: give the tarball a stable name
+        run: mv dsh-web-search-ddg-*.tgz dsh-web-search-ddg.tgz
+
       - name: attach tarball to the GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          files: dsh-web-search-ddg-*.tgz
+          files: dsh-web-search-ddg.tgz
           generate_release_notes: true

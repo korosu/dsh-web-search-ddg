@@ -24,12 +24,17 @@ export interface Config {
     endpoint?: string;
     /** Provider-side result bound when a request carries no `maxResults`. */
     maxResults?: number;
+    /** Consecutive transient failures before the provider goes on cooldown. */
+    failureThreshold?: number;
+    /** Cooldown length in milliseconds once the threshold is reached. */
+    cooldownMs?: number;
 }
 export declare const Config: z<Config>;
 /**
  * Register the DuckDuckGo scrape provider with `ctx.web`. The connector is
  * keyless, so the provider is available as long as the endpoint is a usable
  * http(s) URL and any configured result bound is a positive whole number; the
- * seam reports `WEB_PROVIDER_CONFIGURED_UNAVAILABLE` otherwise.
+ * seam reports `WEB_PROVIDER_CONFIGURED_UNAVAILABLE` otherwise. The failure
+ * budget keys are validated the same way.
  */
 export declare function apply(ctx: Context, config: Config): void;

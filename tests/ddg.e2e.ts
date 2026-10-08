@@ -5,9 +5,11 @@ import { DdgSearchProvider, DDG_DEFAULT_ENDPOINT } from '../src/provider.ts'
 /**
  * Real-network smoke for the DuckDuckGo scrape provider. Self-skips unless
  * `DDG_E2E=1` so ordinary `pnpm test` never depends on the network or on DDG's
- * rate limiting. DDG may answer a challenge page to datacenter IPs, in which
- * case the assertion on non-empty sources legitimately fails — run from a
- * residential network and, if rate-limited, wait before rerunning.
+ * rate limiting. DDG may answer a challenge page to datacenter IPs; since the
+ * failure budget landed that surfaces as a `WEB_PROVIDER_ERROR` naming the
+ * anomaly page rather than an empty result — the assertion failure itself is
+ * the throttle signal. Run from a residential network and, if rate-limited,
+ * wait before rerunning.
  */
 const maybe = process.env.DDG_E2E === '1' ? describe : describe.skip
 

@@ -23,6 +23,10 @@ export interface DdgSearchProviderOptions {
     endpoint: string;
     /** Default result limit when a request carries no `maxResults`. */
     maxResults?: number;
+    /** Consecutive transient failures before the provider goes on cooldown. */
+    failureThreshold?: number;
+    /** Cooldown length in milliseconds once the threshold is reached. */
+    cooldownMs?: number;
 }
 /**
  * Extract the real destination from a DDG redirect URL, or `undefined` when the
@@ -57,15 +61,35 @@ export declare function mapEntries(entries: readonly DdgScrapeEntry[]): WebSearc
  * The DuckDuckGo scrape search provider. HTTP redirects are followed by the
  * native fetch (the endpoint 301s between the bare domain and the `html/`
  * path); a result hop is never followed — it is decoded from the markup instead
- * of fetched. Fetch/HTTP failures surface as `WEB_PROVIDER_ERROR`.
+ * of fetched.
+ *
+ * Failures are split in two. Transport failures, unreadable bodies, HTTP 429 /
+ * 403 / 5xx, and an anomaly page (HTTP 202 carrying no result markup) are
+ * *transient*: they count toward a failure budget, and once the budget is spent
+ * the provider reports itself unavailable for a cooldown so the seam can pick
+ * another backend instead of failing every call. Any other 4xx is a
+ * configuration error, fails identically on every retry, and is never counted.
  */
 export declare class DdgSearchProvider implements WebSearchProvider {
     readonly id = "ddg";
     private readonly options;
+    private readonly failureThreshold;
+    private readonly cooldownMs;
+    private failures;
+    private cooldownUntil;
     constructor(options: DdgSearchProviderOptions);
-    /** Cheap local usability check; must not make network calls. */
+    /**
+     * Cheap local usability check; must not make network calls. False while the
+     * failure-budget cooldown is open, so the seam can select another provider.
+     */
     available(): boolean;
     search(request: WebSearchRequest, signal?: AbortSignal): Promise<WebSearchResult>;
+    /**
+     * Record a transient failure and throw the provider error for it. Once the
+     * configured threshold of consecutive failures is reached the provider goes
+     * on cooldown and reports itself unavailable until it elapses.
+     */
+    private transientFailure;
 }
 /**
  * Parse the DDG static results page into rows. Rows live under `#links` with
