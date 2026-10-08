@@ -1,6 +1,7 @@
 packages:
   - .
 
-storeDir: .pnpm-store
-stateDir: .pnpm-state
-cacheDir: .npm-cache
+# Deliberately no storeDir/stateDir/cacheDir here: those redirect pnpm's
+# package store, state database and metadata cache into the checkout, which
+# only made sense while this directory was a self-contained scratch
+# environment. A cloned repository should use the machine-global store.
