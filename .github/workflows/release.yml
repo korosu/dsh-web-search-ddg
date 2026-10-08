@@ -1,0 +1,49 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: pack and publish release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+          cache: pnpm
+
+      - name: install
+        run: pnpm install --frozen-lockfile
+
+      - name: typecheck
+        run: pnpm typecheck
+
+      - name: peer-range check
+        run: pnpm peers check
+
+      - name: test (offline suite)
+        run: pnpm test
+
+      # `prepack` builds lib/ first, so the tarball is self-contained and a
+      # consumer needs no build allowance (see README, "The build-script catch").
+      - name: pack tarball
+        run: pnpm pack
+
+      - name: attach tarball to the GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dsh-web-search-ddg-*.tgz
+          generate_release_notes: true

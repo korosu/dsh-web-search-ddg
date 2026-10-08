@@ -1,0 +1,6 @@
+packages:
+  - .
+
+storeDir: .pnpm-store
+stateDir: .pnpm-state
+cacheDir: .npm-cache

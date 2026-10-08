@@ -1,0 +1,30 @@
+# dependencies
+node_modules/
+
+# local tool caches and stores (dev-machine only)
+.npm-cache/
+.pnpm-store/
+.pnpm-state/
+.scratch-profile/
+.dsh-bin/
+.acl-report/
+.lib-check/
+
+# build and test output
+coverage/
+*.tsbuildinfo
+*.tgz
+*.log
+
+# secrets
+.env
+.env.*
+
+# editors and OS noise
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# NOTE: lib/ is intentionally NOT ignored. It ships prebuilt (see README,
+# "The build-script catch") and CI verifies it stays in sync with src/.

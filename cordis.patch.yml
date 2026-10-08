@@ -1,0 +1,22 @@
+# This bundle's config layer. `dsh plugin add` appends the package to the
+# profile's bundle list; the loader then applies this patch to the composed
+# entry list. Nothing in the profile needs to be edited by hand.
+#
+# Two rows:
+#   1. insert — mount the plugin package (registers the `ddg` search provider).
+#      `name` is resolved with Node resolution from the profile, so it must
+#      match `package.json`'s `name` exactly.
+#   2. override the `web` row so the model-facing `web_search` tool selects the
+#      `ddg` provider. A patch replaces a row's whole `config` (no deep merge),
+#      so every key the base row owns must be restated: the shipped base row
+#      (`@deepseek-ai/dsh-base`) owns both `searchProvider` and `fetchProvider`.
+#      Users can override this row again in their own profile patch to switch
+#      back (e.g. `searchProvider: deepseek-official`).
+- insert:
+    - id: web-search-ddg
+      name: dsh-web-search-ddg
+
+- id: web
+  config:
+    searchProvider: ddg
+    fetchProvider: http
