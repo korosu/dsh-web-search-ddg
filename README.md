@@ -1,8 +1,3 @@
----
-description: "A keyless DuckDuckGo HTML-scrape search provider for the DeepSeek Harness web capability seam (ctx.web): zero tokens, no API key, installed with one command."
-kind: "package-reference"
----
-
 # dsh-web-search-ddg
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -204,12 +199,6 @@ An out-of-tree bundle resolves its imports from the profile's `node_modules`, so
 
 - `schemastery` brands its objects with `Symbol.for("schemastery")`, a global-registry symbol, so a `Config` schema built by the profile's copy is still recognized as a schemastery schema by the host's copy.
 - `WebError` is a runtime import (the provider throws it), so two class objects exist. Nothing consumes it with `instanceof` — the seam and `dsh-tool-web` route on the string `code` — so the split is inert today. A future consumer that does an `instanceof` check would break; if you ever need to care, rethrowing the seam's own error instead of constructing one closes it.
-
-### If this ever goes upstream
-
-An in-tree package would be a member of the `dsh` release family and needs, besides the package itself: a `references` entry in the root `tsconfig.host.json`, a `SENTENCE_MODEL_EXPERIENCE` entry in `scripts/verify-package-readme-model-experience.ts`, an `implementations` entry in `scripts/gen-doc-graphs.ts`, a dependency in `python/sdk-runtime/package.json` for the single-exe closure, a row in the `packages/web` package map, `pnpm run gen-tsconfig-paths` and `pnpm run gen-config-catalog`, and no per-package build scripts (the root `build:official` owns the build). Publication then runs from a `dsh-v*` tag through the manual `Release publish (dsh)` workflow, gated by the `npm-publish` environment and `secrets.NPM_TOKEN` — that is a maintainer act, not a contributor one.
-
-Publishing to your own npm scope is much lighter: `npm publish` with `lib/` prebuilt, then `dsh plugin --profile web add @you/dsh-web-search-ddg`. Nothing here needs to change except `package.json`'s `name` and the matching `name` in `cordis.patch.yml`; a scoped public package additionally needs `"publishConfig": { "access": "public" }`.
 
 ## License
 

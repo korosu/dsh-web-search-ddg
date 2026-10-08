@@ -1,8 +1,3 @@
----
-description: "DeepSeek Harness web 能力 seam（ctx.web）的免密钥 DuckDuckGo HTML 抓取搜索提供方：零 token，无需 API 密钥，一条命令安装。"
-kind: "package-reference"
----
-
 # dsh-web-search-ddg
 
 [![许可证: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -202,12 +197,6 @@ out-of-tree 捆绑包从 profile 的 `node_modules` 解析自己的导入，因�
 
 - `schemastery` 用 `Symbol.for("schemastery")` —— 全局注册表符号 —— 为其对象打上品牌，所以由 profile 副本构建的 `Config` schema 仍会被宿主的副本识别为 schemastery schema。
 - `WebError` 是 runtime 导入（本提供方会抛出它），因此存在两个类对象。目前没有任何地方用 `instanceof` 消费它——seam 与 `dsh-tool-web` 按字符串 `code` 路由——所以这个分裂今天是惰性的。若将来有消费者做 `instanceof` 检查，它会失效；真要关心的话，改为抛出 seam 自己的错误而不是自行构造即可闭合。
-
-### 若将来上游化
-
-进入仓库后，本包会成为 `dsh` 发布 family 的成员，除包本身之外还需要：根 `tsconfig.host.json` 的 `references` 条目、`scripts/verify-package-readme-model-experience.ts` 的 `SENTENCE_MODEL_EXPERIENCE` 条目、`scripts/gen-doc-graphs.ts` 的 `implementations` 条目、`python/sdk-runtime/package.json` 中供 single-exe 闭包的依赖、`packages/web` 包映射中的一行、`pnpm run gen-tsconfig-paths` 与 `pnpm run gen-config-catalog`，以及取消按包构建脚本（构建归根 `build:official` 所有）。发布则从 `dsh-v*` 标签经手动的 `Release publish (dsh)` workflow 执行，受 `npm-publish` 环境与 `secrets.NPM_TOKEN` 门禁——那是维护者的动作，不是贡献者的。
-
-发布到你自己的 npm scope 要轻量得多：`lib/` 预构建后 `npm publish`，然后 `dsh plugin --profile web add @you/dsh-web-search-ddg`。此处除 `package.json` 的 `name` 与 `cordis.patch.yml` 中匹配的 `name` 外无需任何改动；公开的 scoped 包还需额外加上 `"publishConfig": { "access": "public" }`。
 
 ## License
 
