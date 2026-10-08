@@ -68,7 +68,7 @@
     "prepack": "tsc -p tsconfig.json",
     "prepare": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test-isolation=none --test tests/ddg.spec.ts tests/ddg.e2e.ts",
-    "test:e2e": "node --test-isolation=none --test tests/ddg.e2e.ts"
+    "test": "node --experimental-test-isolation=none --test tests/ddg.spec.ts tests/ddg.e2e.ts",
+    "test:e2e": "node --experimental-test-isolation=none --test tests/ddg.e2e.ts"
   }
 }

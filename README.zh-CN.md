@@ -159,7 +159,7 @@ HTTP 重定向由原生 fetch 跟随，因为端点会在裸域与 `html/` 路�
 
 ## 开发
 
-运行需要 Node ≥ 22；测试脚本使用 Node 原生 TypeScript 支持（无打包器，完全进程内），因此需要开启类型剥离——≥ 22.18，推荐 Node 24。
+运行需要 Node ≥ 22；测试脚本使用 Node 原生 TypeScript 支持（无打包器，完全进程内），因此需要开启类型剥离（≥ 22.18），并通过 `--experimental-test-isolation=none`（≥ 22.8；不带 `experimental-` 前缀的写法只在 Node 24+ 存在）把所有文件跑在同一个进程里——推荐 Node 24。
 
 ```bash
 pnpm install

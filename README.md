@@ -159,7 +159,7 @@ These limits define when the provider is a poor fit.
 
 ## Development
 
-Node ≥ 22 to run; the test scripts use Node's native TypeScript support (no bundler, fully in-process), so they need type stripping enabled — ≥ 22.18, Node 24 recommended.
+Node ≥ 22 to run; the test scripts use Node's native TypeScript support (no bundler, fully in-process), so they need type stripping enabled (≥ 22.18) and run every file in one process through `--experimental-test-isolation=none` (≥ 22.8; the unprefixed name only exists on Node 24+) — Node 24 recommended.
 
 The dev dependencies pin the seam line under test: `@deepseek-ai/dsh-web@0.2.0-rc.1` with `@deepseek-ai/cordis ~4.0.4` and `@deepseek-ai/schemastery ~3.18.4`, matching what dsh 0.2.0-rc.1 ships (see the Dev Note on the dsh peer range).
 

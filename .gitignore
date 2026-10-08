@@ -9,6 +9,7 @@ node_modules/
 .dsh-bin/
 .acl-report/
 .lib-check/
+.gh-cache/
 
 # build and test output
 coverage/

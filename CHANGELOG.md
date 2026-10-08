@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Test scripts now pass `--experimental-test-isolation=none` instead of the
+  unprefixed `--test-isolation=none`, which only exists on Node 24+ and made
+  `pnpm test` abort with `bad option` on Node 22.
+
 ## [0.1.1] - 2026-10-08
 
 ### Added
