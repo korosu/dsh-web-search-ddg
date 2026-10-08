@@ -7,11 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-08
+
 ### Fixed
 
 - Test scripts now pass `--experimental-test-isolation=none` instead of the
   unprefixed `--test-isolation=none`, which only exists on Node 24+ and made
   `pnpm test` abort with `bad option` on Node 22.
+
+### Changed
+
+- Removed the in-tree README front matter (`description` / `kind:
+  "package-reference"`). It is metadata for the DeepSeek Harness in-tree doc
+  pipeline; GitHub renders front matter as a table above the README body, and
+  the `description` sentence duplicated `package.json`.
+- Removed the "If this ever goes upstream" maintainer note from both READMEs —
+  it described in-tree publication steps that do not apply to this repository.
 
 ## [0.1.1] - 2026-10-08
 

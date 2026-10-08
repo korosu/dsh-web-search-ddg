@@ -1,6 +1,6 @@
 {
   "name": "dsh-web-search-ddg",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Zero-token DuckDuckGo HTML-scrape search provider for the DeepSeek Harness web capability seam (ctx.web): no API key, no auxiliary model request.",
   "type": "module",
   "main": "lib/index.js",
