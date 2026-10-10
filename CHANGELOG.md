@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-10-09
+
 ### Added
 
 - Live e2e case matrix (`DDG_E2E=1`): an English query, a Cyrillic query

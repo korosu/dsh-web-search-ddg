@@ -33,7 +33,7 @@ The release tarball installs from a URL that never changes with the version, bec
 dsh plugin --profile web add https://github.com/korosu/dsh-web-search-ddg/releases/latest/download/dsh-web-search-ddg.tgz
 ```
 
-Swap `latest` for a tag to pin (`.../releases/download/v0.1.4/dsh-web-search-ddg.tgz`). All three forms install the same prebuilt `lib/`; only the source differs.
+Swap `latest` for a tag to pin (`.../releases/download/v0.1.5/dsh-web-search-ddg.tgz`). All three forms install the same prebuilt `lib/`; only the source differs.
 
 That is all of it, because `dsh plugin add` does the whole job on its own:
 

@@ -33,7 +33,7 @@ Release tarball 也可以从 URL 安装——每个 release 都以同一个固�
 dsh plugin --profile web add https://github.com/korosu/dsh-web-search-ddg/releases/latest/download/dsh-web-search-ddg.tgz
 ```
 
-把 `latest` 换成 tag 即可固定版本（`.../releases/download/v0.1.4/dsh-web-search-ddg.tgz`）。三种形式安装的都是同一份预构建 `lib/`，区别只在来源。
+把 `latest` 换成 tag 即可固定版本（`.../releases/download/v0.1.5/dsh-web-search-ddg.tgz`）。三种形式安装的都是同一份预构建 `lib/`，区别只在来源。
 
 仅此而已，因为 `dsh plugin add` 自己就把全部工作做完了：
 
