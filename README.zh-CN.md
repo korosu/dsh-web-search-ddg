@@ -33,7 +33,7 @@ Release tarball 也可以从 URL 安装——每个 release 都以同一个固�
 dsh plugin --profile web add https://github.com/korosu/dsh-web-search-ddg/releases/latest/download/dsh-web-search-ddg.tgz
 ```
 
-把 `latest` 换成 tag 即可固定版本（`.../releases/download/v0.1.5/dsh-web-search-ddg.tgz`）。三种形式安装的都是同一份预构建 `lib/`，区别只在来源。
+把 `latest` 换成 tag 即可固定版本（`.../releases/download/v0.2.0/dsh-web-search-ddg.tgz`）。三种形式安装的都是同一份预构建 `lib/`，区别只在来源。
 
 仅此而已，因为 `dsh plugin add` 自己就把全部工作做完了：
 
@@ -165,8 +165,8 @@ HTTP 重定向由原生 fetch 跟随，因为端点会在裸域与 `html/` 路�
 | dsh 发布 | 验证内容 |
 | --- | --- |
 | `0.2.0-rc.1` | 完整路径：通过 `dsh plugin add` 装进真实 profile、启动、并回答真实查询 |
-| `0.2.0-rc.2` | 契约套件（typecheck + 44 个离线测试）对该 seam，经 `pnpm compat` |
-| `0.2.1-alpha.1` | 契约套件（typecheck + 44 个离线测试）对该 seam，经 `pnpm compat` |
+| `0.2.0-rc.2` | 契约套件（typecheck + 73 个离线测试）对该 seam，经 `pnpm compat` |
+| `0.2.1-alpha.1` | 契约套件（typecheck + 73 个离线测试）对该 seam，经 `pnpm compat` |
 
 semver 的预发布规则带来两个影响，直接决定了声明长什么样：
 
@@ -214,7 +214,7 @@ semver 的预发布规则带来两个影响，直接决定了声明长什么样�
 
 ```bash
 pnpm install
-pnpm test          # 单元 + 集成，离线（fetch 被 stub）；44 个测试
+pnpm test          # 单元 + 集成，离线（fetch 被 stub）；73 个测试
 DDG_E2E=1 pnpm test:e2e   # 真实网络 smoke；未设标志时自跳过
 pnpm typecheck
 pnpm peers check   # 针对已安装 seam 线的 peer 范围自检
