@@ -26,7 +26,7 @@ export {
   DDG_PROVIDER_ID,
   DdgSearchProvider,
 } from './provider.ts'
-export type { DdgSearchProviderOptions } from './provider.ts'
+export type { DdgRequestEvent, DdgSearchProviderOptions } from './provider.ts'
 
 /** Cordis plugin name used by loader diagnostics. */
 export const name = 'web-search-ddg'
@@ -46,6 +46,8 @@ export interface Config {
   acceptLanguage?: string
   /** Per-request deadline in milliseconds; a timeout is a transient failure. */
   timeoutMs?: number
+  /** Minimum spacing between request starts in milliseconds; 0 = no pacing. */
+  minIntervalMs?: number
   /** Consecutive transient failures before the provider goes on cooldown. */
   failureThreshold?: number
   /** Cooldown length in milliseconds once the threshold is reached. */
@@ -58,6 +60,7 @@ export const Config: z<Config> = z.object({
   userAgent: z.string(),
   acceptLanguage: z.string(),
   timeoutMs: z.number().step(1).min(1),
+  minIntervalMs: z.number().step(1).min(0),
   failureThreshold: z.number().step(1).min(1),
   cooldownMs: z.number().step(1).min(1),
 })
@@ -70,13 +73,19 @@ export const Config: z<Config> = z.object({
  * and failure-budget keys are validated the same way.
  */
 export function apply(ctx: Context, config: Config): void {
+  // One debug-level line per request attempt (status, latency, body size — no
+  // query text) goes to the host logger, so throttling episodes are visible
+  // in the host log without this plugin writing any files of its own.
+  const logger = ctx.logger('web-search-ddg')
   ctx.web.registerSearchProvider(new DdgSearchProvider({
     endpoint: config.endpoint ?? DDG_DEFAULT_ENDPOINT,
     ...config.maxResults !== undefined ? { maxResults: config.maxResults } : {},
     ...config.userAgent !== undefined ? { userAgent: config.userAgent } : {},
     ...config.acceptLanguage !== undefined ? { acceptLanguage: config.acceptLanguage } : {},
     ...config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {},
+    ...config.minIntervalMs !== undefined ? { minIntervalMs: config.minIntervalMs } : {},
     ...config.failureThreshold !== undefined ? { failureThreshold: config.failureThreshold } : {},
     ...config.cooldownMs !== undefined ? { cooldownMs: config.cooldownMs } : {},
+    log: event => logger.debug('ddg search: HTTP %s in %d ms, %d bytes', event.status, event.ms, event.bytes),
   }))
 }

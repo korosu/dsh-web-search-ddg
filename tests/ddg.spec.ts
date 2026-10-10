@@ -5,11 +5,13 @@ import WebRuntime from '@deepseek-ai/dsh-web'
 import {
   DdgSearchProvider,
   DDG_PROVIDER_ID,
+  hasResultContainer,
   mapEntries,
   parseResults,
   resolveDestination,
   toSource,
 } from '../src/provider.ts'
+import type { DdgRequestEvent } from '../src/provider.ts'
 import * as ddgPlugin from '../src/index.ts'
 
 const options = { endpoint: 'https://html.duckduckgo.com/html/' }
@@ -89,6 +91,18 @@ function sponsoredRow(): string {
           <a class="result__snippet" href="${hop}">Buy now.</a>
         </div>
       </div>`
+}
+
+/** A fetch stub that never settles on its own — only the request signal aborts it (mirrors native fetch, including an already-aborted signal). */
+function hangUntilAborted(): (url: string, init?: RequestInit) => Promise<Response> {
+  return (_, init) => new Promise<Response>((_resolve, reject) => {
+    const signal = init?.signal
+    if (signal?.aborted === true) {
+      reject(signal.reason)
+      return
+    }
+    signal?.addEventListener('abort', () => reject(signal.reason), { once: true })
+  })
 }
 
 /** Assertion helper: the rejected error must carry a WebError code and optional message pattern. */
@@ -269,6 +283,24 @@ describe('parseResults', () => {
     const entries = parseResults(page)
     assert.deepEqual(entries.map(entry => entry.title), ['Organic 1', 'Organic 2'])
   })
+
+  it('reads title and snippet by class, not by tag', () => {
+    const page = `<div id="links">
+      <div class="result web-result">
+        <h2 class="result__title"><span class="result__a" href="https://plain.example/span">Non-anchor title</span></h2>
+        <div class="result__snippet">Non-anchor snippet.</div>
+      </div>
+    </div>`
+    assert.deepEqual(parseResults(page), [
+      { rawHref: 'https://plain.example/span', title: 'Non-anchor title', snippet: 'Non-anchor snippet.' },
+    ])
+  })
+
+  it('detects the results container independently of row count', () => {
+    assert.equal(hasResultContainer('<div id="links"></div>'), true)
+    assert.equal(hasResultContainer('<div class="no-results">none</div>'), false)
+    assert.equal(hasResultContainer(''), false)
+  })
 })
 
 describe('DdgSearchProvider availability', () => {
@@ -305,6 +337,16 @@ describe('DdgSearchProvider availability', () => {
   it('is unavailable with an empty userAgent or acceptLanguage', () => {
     assert.equal(new DdgSearchProvider({ ...options, userAgent: '' }).available(), false)
     assert.equal(new DdgSearchProvider({ ...options, acceptLanguage: '' }).available(), false)
+  })
+
+  it('is unavailable with an invalid minIntervalMs', () => {
+    assert.equal(new DdgSearchProvider({ ...options, minIntervalMs: -1 }).available(), false)
+    assert.equal(new DdgSearchProvider({ ...options, minIntervalMs: 1.5 }).available(), false)
+  })
+
+  it('is available with a non-negative integer minIntervalMs', () => {
+    assert.equal(new DdgSearchProvider({ ...options, minIntervalMs: 0 }).available(), true)
+    assert.equal(new DdgSearchProvider({ ...options, minIntervalMs: 10_000 }).available(), true)
   })
 })
 
@@ -373,6 +415,42 @@ describe('DdgSearchProvider request mapping', () => {
     assert.ok(calls[0]?.init.signal instanceof AbortSignal, 'a deadline signal must always be armed')
   })
 
+  it('spaces consecutive request starts by minIntervalMs', async () => {
+    const starts: number[] = []
+    stubFetch(async () => {
+      starts.push(Date.now())
+      return htmlResponse(resultsPage())
+    })
+    const provider = new DdgSearchProvider({ ...options, minIntervalMs: 120 })
+    await Promise.all([
+      provider.search({ query: 'a' }),
+      provider.search({ query: 'b' }),
+    ])
+    assert.equal(starts.length, 2)
+    assert.ok((starts[1]! - starts[0]!) >= 100, `request starts too close: ${starts.join(', ')}`)
+  })
+
+  it('reports one request event per attempt through the log hook', async () => {
+    const events: DdgRequestEvent[] = []
+    stubFetch(async () => htmlResponse(resultsPage()))
+    await new DdgSearchProvider({ ...options, log: event => events.push(event) }).search({ query: 'q' })
+    assert.equal(events.length, 1)
+    assert.equal(events[0]?.status, 200)
+    assert.ok(events[0]!.ms >= 0)
+    assert.equal(events[0]?.bytes, resultsPage().length)
+  })
+
+  it('reports a request event with zero bytes for a non-2xx response', async () => {
+    const events: DdgRequestEvent[] = []
+    stubFetch(async () => new Response('nope', { status: 503 }))
+    await assert.rejects(
+      new DdgSearchProvider({ ...options, log: event => events.push(event) }).search({ query: 'q' }),
+      rejectsWithCode('WEB_PROVIDER_ERROR'),
+    )
+    assert.equal(events[0]?.status, 503)
+    assert.equal(events[0]?.bytes, 0)
+  })
+
   it('returns the parsed sources for a successful page', async () => {
     stubFetch(async () => htmlResponse(resultsPage()))
     const result = await new DdgSearchProvider(options).search({ query: 'q' })
@@ -429,10 +507,26 @@ describe('DdgSearchProvider error handling', () => {
     )
   })
 
-  it('keeps a 200 page without rows an empty result rather than a failure', async () => {
-    stubFetch(async () => new Response('<html><body>no rows</body></html>', { status: 200 }))
+  it('keeps a 200 page with the results container but no rows an empty result', async () => {
+    stubFetch(async () => new Response('<div id="links"><div class="no-results">No results</div></div>', { status: 200 }))
     const result = await new DdgSearchProvider(options).search({ query: 'q' })
     assert.deepEqual(result, { sources: [], truncated: false })
+  })
+
+  it('treats a 200 page with no results container as a transient failure', async () => {
+    stubFetch(async () => new Response('<html><body>no markup</body></html>', { status: 200 }))
+    await assert.rejects(
+      new DdgSearchProvider(options).search({ query: 'q' }),
+      rejectsWithCode('WEB_PROVIDER_ERROR', /no results markup/),
+    )
+  })
+
+  it('treats an empty 200 body as a transient failure', async () => {
+    stubFetch(async () => new Response('', { status: 200 }))
+    await assert.rejects(
+      new DdgSearchProvider(options).search({ query: 'q' }),
+      rejectsWithCode('WEB_PROVIDER_ERROR', /no results markup/),
+    )
   })
 
   it('does not count a non-retriable 4xx toward the failure budget', async () => {
@@ -528,22 +622,14 @@ describe('DdgSearchProvider error handling', () => {
   })
 
   it('times out a hung request as a transient failure that consumes the budget', async () => {
-    stubFetch((_, init) => new Promise<Response>((_resolve, reject) => {
-      init?.signal?.addEventListener('abort', () => {
-        reject((init.signal as AbortSignal).reason)
-      }, { once: true })
-    }))
+    stubFetch(hangUntilAborted())
     const provider = new DdgSearchProvider({ ...options, timeoutMs: 1, failureThreshold: 1, cooldownMs: 60_000 })
     await assert.rejects(provider.search({ query: 'q' }), rejectsWithCode('WEB_PROVIDER_ERROR'))
     assert.equal(provider.available(), false, 'the timeout consumed the budget and opened the cooldown')
   })
 
   it('still maps a caller abort to WEB_ABORTED while a deadline is armed', async () => {
-    stubFetch((_, init) => new Promise<Response>((_resolve, reject) => {
-      init?.signal?.addEventListener('abort', () => {
-        reject((init.signal as AbortSignal).reason)
-      }, { once: true })
-    }))
+    stubFetch(hangUntilAborted())
     const provider = new DdgSearchProvider({ ...options, timeoutMs: 60_000 })
     const controller = new AbortController()
     const pending = provider.search({ query: 'q' }, controller.signal)
@@ -551,10 +637,30 @@ describe('DdgSearchProvider error handling', () => {
     await assert.rejects(pending, rejectsWithCode('WEB_ABORTED'))
   })
 
-  it('returns empty sources for a success page without parseable results', async () => {
-    stubFetch(async () => htmlResponse('<html><body>anomaly</body></html>'))
+  it('fails fast without contacting the endpoint while on cooldown', async () => {
+    stubFetch(async () => { throw new TypeError('connection refused') })
+    const provider = new DdgSearchProvider({ ...options, failureThreshold: 1, cooldownMs: 60_000 })
+    await assert.rejects(provider.search({ query: 'q' }), rejectsWithCode('WEB_PROVIDER_ERROR'))
+    const calls = stubFetch(async () => htmlResponse(resultsPage()))
+    await assert.rejects(
+      provider.search({ query: 'q' }),
+      rejectsWithCode('WEB_PROVIDER_ERROR', /on cooldown/),
+    )
+    assert.equal(calls.length, 0, 'a tripped breaker must not hit the endpoint')
+  })
+
+  it('rejects a direct search() call on a misconfigured endpoint with a structured error', async () => {
+    stubFetch(async () => htmlResponse(resultsPage()))
+    await assert.rejects(
+      new DdgSearchProvider({ endpoint: 'not a url' }).search({ query: 'q' }),
+      rejectsWithCode('WEB_PROVIDER_ERROR', /endpoint is not a usable/),
+    )
+  })
+
+  it('returns empty sources for a served page whose rows all failed to map', async () => {
+    stubFetch(async () => htmlResponse(`<div id="links">${organicRow(1)}</div>`))
     const result = await new DdgSearchProvider(options).search({ query: 'q' })
-    assert.deepEqual(result.sources, [])
+    assert.deepEqual(result.sources.map(source => source.url), ['https://plain.example/p1'])
   })
 })
 
@@ -582,6 +688,16 @@ describe('web-search-ddg plugin registration', () => {
       ctx.web.search({ query: 'q' }),
       rejectsWithCode('WEB_PROVIDER_CONFIGURED_UNAVAILABLE'),
     )
+  })
+
+  it('honors a configured maxResults through the seam', async () => {
+    stubFetch(async () => htmlResponse(`<div id="links">${organicRow(1)}${organicRow(2)}${organicRow(3)}</div>`))
+    const ctx = new Context()
+    await ctx.plugin(WebRuntime, { searchProvider: DDG_PROVIDER_ID })
+    const fiber = await ctx.plugin(ddgPlugin, { maxResults: 2 })
+    const result = await ctx.web.search({ query: 'q' })
+    assert.deepEqual(result.sources.map(source => source.url), ['https://plain.example/p1', 'https://plain.example/p2'])
+    await fiber.dispose()
   })
 
   it('has no default export (namespace plugin export shape)', () => {

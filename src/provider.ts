@@ -53,6 +53,20 @@ export const DDG_DEFAULT_TIMEOUT_MS = 30_000
 const FAILURE_THRESHOLD = 3
 const COOLDOWN_MS = 5 * 60 * 1000
 
+/**
+ * One request's outcome, reported through the `log` hook for host-side
+ * diagnostics. Carries no query text — queries are user content and belong to
+ * the tool layer's own logging.
+ */
+export interface DdgRequestEvent {
+  /** HTTP status of the response; `0` when the request never completed. */
+  readonly status: number
+  /** Wall-clock request duration in milliseconds. */
+  readonly ms: number
+  /** Response body size in bytes; `0` when no body was read. */
+  readonly bytes: number
+}
+
 /** Resolved provider options (the plugin's `apply` supplies defaults). */
 export interface DdgSearchProviderOptions {
   /** Results endpoint; `?q=` is appended. Must be an absolute http/https URL. */
@@ -65,10 +79,19 @@ export interface DdgSearchProviderOptions {
   acceptLanguage?: string
   /** Per-request deadline in milliseconds; a timeout is a transient failure. */
   timeoutMs?: number
+  /**
+   * Minimum spacing between request starts, in milliseconds; `0` (the
+   * default) disables pacing. Serializes bursts: one tool call batching N
+   * queries sends N back-to-back requests, and live runs showed bursts of ~3
+   * tripping the endpoint's anomaly page.
+   */
+  minIntervalMs?: number
   /** Consecutive transient failures before the provider goes on cooldown. */
   failureThreshold?: number
   /** Cooldown length in milliseconds once the threshold is reached. */
   cooldownMs?: number
+  /** Optional host-logger hook: one event per request attempt. */
+  log?: (event: DdgRequestEvent) => void
 }
 
 /**
@@ -79,6 +102,23 @@ export interface DdgSearchProviderOptions {
  */
 function isPositiveInteger(value: number): boolean {
   return Number.isInteger(value) && value > 0
+}
+
+/**
+ * True for a DDG-compatible pacing interval (zero or a positive whole number).
+ * Keeping the predicate local mirrors `isPositiveInteger`.
+ */
+function isNonNegativeInteger(value: number): boolean {
+  return Number.isInteger(value) && value >= 0
+}
+
+/**
+ * True for an endpoint the provider can actually fetch: an absolute http(s)
+ * URL. Shared by `available()` and the direct-call guard in `search()`, so a
+ * misconfiguration surfaces as a structured error, never a raw `TypeError`.
+ */
+function isUsableEndpoint(endpoint: string): boolean {
+  return (endpoint.startsWith('http://') || endpoint.startsWith('https://')) && URL.canParse(endpoint)
 }
 
 /**
@@ -222,13 +262,17 @@ export class DdgSearchProvider implements WebSearchProvider {
   private readonly options: DdgSearchProviderOptions
   private readonly failureThreshold: number
   private readonly cooldownMs: number
+  private readonly minIntervalMs: number
   private failures = 0
   private cooldownUntil = 0
+  private lastRequestAt = 0
+  private queueTail: Promise<void> = Promise.resolve()
 
   constructor(options: DdgSearchProviderOptions) {
     this.options = options
     this.failureThreshold = options.failureThreshold ?? FAILURE_THRESHOLD
     this.cooldownMs = options.cooldownMs ?? COOLDOWN_MS
+    this.minIntervalMs = options.minIntervalMs ?? 0
   }
 
   /**
@@ -245,15 +289,39 @@ export class DdgSearchProvider implements WebSearchProvider {
       this.failures = 0
       this.cooldownUntil = 0
     }
-    return URL.canParse(this.options.endpoint)
-      && (this.options.endpoint.startsWith('http://') || this.options.endpoint.startsWith('https://'))
+    return isUsableEndpoint(this.options.endpoint)
       && (this.options.maxResults === undefined || isPositiveInteger(this.options.maxResults))
       && (this.options.userAgent === undefined || this.options.userAgent.length > 0)
       && (this.options.acceptLanguage === undefined || this.options.acceptLanguage.length > 0)
       && (this.options.timeoutMs === undefined || isPositiveInteger(this.options.timeoutMs))
+      && (this.options.minIntervalMs === undefined || isNonNegativeInteger(this.options.minIntervalMs))
   }
 
   async search(request: WebSearchRequest, signal?: AbortSignal): Promise<WebSearchResult> {
+    // Direct calls may bypass the seam's available() gate; a misconfigured
+    // endpoint would otherwise crash on `new URL` with a raw TypeError. A
+    // configuration error never counts toward the failure budget.
+    if (!isUsableEndpoint(this.options.endpoint)) {
+      throw new WebError(`DuckDuckGo endpoint is not a usable http(s) URL: ${this.options.endpoint}`, 'WEB_PROVIDER_ERROR')
+    }
+    // The breaker is open: fail fast instead of feeding the throttle — a
+    // query batch that trips the budget must not keep hitting the endpoint
+    // while the throttle flag is live. The seam re-selects until the cooldown
+    // elapses, and this throw is not another budget entry.
+    if (this.cooldownUntil !== 0) {
+      const now = Date.now()
+      if (now < this.cooldownUntil) {
+        throw new WebError(`DuckDuckGo provider is on cooldown for another ${Math.ceil((this.cooldownUntil - now) / 1000)}s after ${this.failures} consecutive transient failures`, 'WEB_PROVIDER_ERROR')
+      }
+      // Cooldown elapsed: start a fresh window, mirroring available().
+      this.failures = 0
+      this.cooldownUntil = 0
+    }
+    // Pacing is the only await before fetch; skip it entirely when disabled so
+    // the fetch still starts in this call's synchronous prefix (callers may
+    // abort synchronously right after invoking search()).
+    if (this.minIntervalMs > 0) await this.pace(signal)
+    const startedAt = Date.now()
     const url = new URL(this.options.endpoint)
     url.searchParams.set('q', request.query)
     // Every request carries a deadline (`timeoutMs`, default 30s) composed
@@ -274,11 +342,13 @@ export class DdgSearchProvider implements WebSearchProvider {
         signal: fetchSignal,
       })
     } catch (error: unknown) {
+      this.emitRequest({ status: 0, ms: Date.now() - startedAt, bytes: 0 })
       if (signal?.aborted === true || isAbortError(error)) throw webAborted(signal, error)
       throw this.transientFailure(`DuckDuckGo search request failed: ${String(error)}`, error)
     }
 
     if (!response.ok) {
+      this.emitRequest({ status: response.status, ms: Date.now() - startedAt, bytes: 0 })
       const message = `DuckDuckGo returned an error response (HTTP ${response.status})`
       if (!isTransientStatus(response.status)) {
         // A configuration error: same outcome on every retry, so it must not
@@ -292,24 +362,60 @@ export class DdgSearchProvider implements WebSearchProvider {
     try {
       html = await response.text()
     } catch (error: unknown) {
+      this.emitRequest({ status: response.status, ms: Date.now() - startedAt, bytes: 0 })
       if (signal?.aborted === true || isAbortError(error)) throw webAborted(signal, error)
       throw this.transientFailure(`DuckDuckGo returned an unreadable response body: ${String(error)}`, error)
     }
+    this.emitRequest({ status: response.status, ms: Date.now() - startedAt, bytes: html.length })
 
     // provider-side bound on usable sources, applied after normalization so
     // junk rows cannot push usable ones past the cut; the seam caps regardless.
     const limit = request.maxResults ?? this.options.maxResults
     const entries = parseResults(html)
 
-    // An anomaly page is a 2xx carrying no result markup. A 200 with no rows is
-    // a genuinely empty query and stays an empty result; only the anomaly
-    // signature counts as a failure, so throttling is distinguishable.
-    if (entries.length === 0 && response.status === 202) {
-      throw this.transientFailure('DuckDuckGo answered with an anomaly page (HTTP 202) carrying no result markup; the endpoint is likely rate-limiting or challenging this client')
+    // An anomaly page is a 2xx carrying no result markup. A 200 whose page
+    // still carries the results container is a genuinely empty query and
+    // stays an empty result. Live-verified (2026-10-10): every served page —
+    // organic results, fuzzy matches, the true no-results page — carries
+    // #links; only the challenge page does not.
+    if (entries.length === 0) {
+      if (response.status === 202) {
+        throw this.transientFailure('DuckDuckGo answered with an anomaly page (HTTP 202) carrying no result markup; the endpoint is likely rate-limiting or challenging this client')
+      }
+      if (!hasResultContainer(html)) {
+        throw this.transientFailure('DuckDuckGo answered with a page carrying no results markup at all (no #links container); the endpoint is likely serving an anomaly or challenge page, or the markup changed')
+      }
     }
 
     this.failures = 0
     return mapEntries(entries, limit)
+  }
+
+  /**
+   * Serialize and pace request starts when a minimum interval is configured:
+   * requests through one provider instance then reach the endpoint no faster
+   * than one per `minIntervalMs`, which keeps a batched burst from tripping
+   * the endpoint's anomaly page. The caller's abort is honored while waiting.
+   */
+  private async pace(signal?: AbortSignal): Promise<void> {
+    if (this.minIntervalMs <= 0) return
+    const previous = this.queueTail
+    let release!: () => void
+    this.queueTail = new Promise<void>(resolve => { release = resolve })
+    await previous
+    const wait = this.lastRequestAt + this.minIntervalMs - Date.now()
+    if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait))
+    if (signal?.aborted === true) {
+      release()
+      throw webAborted(signal, undefined)
+    }
+    this.lastRequestAt = Date.now()
+    release()
+  }
+
+  /** Report one request outcome to the host-logger hook, when wired. */
+  private emitRequest(event: DdgRequestEvent): void {
+    this.options.log?.(event)
   }
 
   /**
@@ -337,8 +443,22 @@ function webAborted(signal: AbortSignal | undefined, fallback: unknown): WebErro
 }
 
 /**
+ * True when the page carries the `#links` results container at all. Every
+ * page the endpoint serves — organic results, fuzzy matches, the true
+ * no-results page — carries it; a 2xx body without it is an anomaly or
+ * challenge page, not an empty query (live-verified against the endpoint).
+ *
+ * @param html - the response body.
+ */
+export function hasResultContainer(html: string): boolean {
+  if (html.length === 0) return false
+  return load(html)('#links').length > 0
+}
+
+/**
  * Parse the DDG static results page into rows. Rows live under `#links` with
- * class `result`; the title is `a.result__a` and the snippet `a.result__snippet`.
+ * class `result`; the title is `.result__a` and the snippet `.result__snippet`
+ * (class-anchored, not tag-anchored, so an upstream `a`↔`td` swap survives).
  * Sponsored placements — rows carrying any `result--ad*` class — are skipped:
  * they are paid positions rather than organic results, and their links point
  * at a `y.js` tracking hop instead of a citation target. Every row is parsed;
@@ -355,8 +475,8 @@ export function parseResults(html: string): DdgScrapeEntry[] {
   $('#links .result').each((_, elem) => {
     const classes = (($(elem).attr('class')) ?? '').split(/\s+/).filter(cls => cls.length > 0)
     if (classes.some(cls => cls.startsWith('result--ad'))) return true
-    const titleEl = $(elem).find('a.result__a')
-    const snippetEl = $(elem).find('a.result__snippet')
+    const titleEl = $(elem).find('.result__a')
+    const snippetEl = $(elem).find('.result__snippet')
     const rawHref = titleEl.attr('href') ?? ''
     const title = titleEl.text().trim()
     const snippet = snippetEl.text().trim()

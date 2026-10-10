@@ -13,7 +13,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import z from '@deepseek-ai/schemastery';
 export { DDG_DEFAULT_ENDPOINT, DDG_DEFAULT_TIMEOUT_MS, DDG_DEFAULT_USER_AGENT, DDG_PROVIDER_ID, DdgSearchProvider, } from './provider.ts';
-export type { DdgSearchProviderOptions } from './provider.ts';
+export type { DdgRequestEvent, DdgSearchProviderOptions } from './provider.ts';
 /** Cordis plugin name used by loader diagnostics. */
 export declare const name = "web-search-ddg";
 /** The web seam this provider registers into. */
@@ -30,6 +30,8 @@ export interface Config {
     acceptLanguage?: string;
     /** Per-request deadline in milliseconds; a timeout is a transient failure. */
     timeoutMs?: number;
+    /** Minimum spacing between request starts in milliseconds; 0 = no pacing. */
+    minIntervalMs?: number;
     /** Consecutive transient failures before the provider goes on cooldown. */
     failureThreshold?: number;
     /** Cooldown length in milliseconds once the threshold is reached. */

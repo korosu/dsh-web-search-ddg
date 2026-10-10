@@ -18,6 +18,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   transient `WEB_PROVIDER_ERROR` that consumes the failure budget. An empty
   `userAgent` or `acceptLanguage`, or a non-positive-integer `timeoutMs`,
   makes the provider report itself unavailable, like the other config keys.
+- `minIntervalMs` config key (default `0`, off): serializes and spaces request
+  starts inside the provider. One `web_search` tool call batching N queries
+  sends N back-to-back requests — collected live usage logs showed bursts of
+  ~3 tripping the anomaly page — so throttled deployments can pace batches
+  without touching the tool layer.
+- One debug-level host-logger line per request attempt (status, latency,
+  body size — no query text), wired through `ctx.logger('web-search-ddg')`.
+  The plugin writes no files of its own; throttling episodes become visible
+  in the host log.
 
 ### Changed
 
@@ -28,6 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   results can now return N usable sources when the page holds them. The
   exported `parseResults` helper no longer takes a row cap — `mapEntries`
   gained the optional limit parameter instead.
+- `search()` now fails fast while the failure budget is on cooldown instead
+  of contacting the endpoint again. Previously every query in a batched
+  burst re-hit the endpoint even after the budget was spent, feeding the
+  throttle that keeps the anomaly flag alive (observed in live usage logs).
 
 ### Fixed
 
@@ -46,6 +59,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   re-parsed through `URL` — so a hop carrying unencoded characters (a literal
   space in the path, for example) surfaces as a valid URL instead of a raw
   decoded string.
+- A 2xx response without the `#links` results container now classifies as a
+  transient failure instead of a silently empty result. Live-verified
+  (2026-10-10): every served page — organic results, fuzzy matches, and the
+  true no-results page — carries `#links`; only the challenge page does not.
+  Markup drift that removes the container is now distinguishable from a
+  genuinely empty query.
+- Direct `search()` calls with a misconfigured endpoint raise a structured
+  `WEB_PROVIDER_ERROR` instead of a raw `TypeError` from `new URL`.
+- Result rows are matched by class (`.result__a` / `.result__snippet`), not
+  by tag, so an upstream `a`↔`td` swap in the served markup survives.
 
 ## [0.1.5] - 2026-10-09
 
