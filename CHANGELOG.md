@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `maxResults` (configured or per-request) now bounds **usable** sources,
+  applied after rows with blank titles, unusable URLs, sponsored rows, and
+  duplicates are dropped. Previously the cap applied to parsed rows, so junk
+  rows early in the page could push valid ones past the cut; a request for N
+  results can now return N usable sources when the page holds them. The
+  exported `parseResults` helper no longer takes a row cap — `mapEntries`
+  gained the optional limit parameter instead.
+
 ### Fixed
 
 - Sponsored result rows no longer reach answers: rows carrying any

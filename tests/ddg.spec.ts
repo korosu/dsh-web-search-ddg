@@ -210,6 +210,32 @@ describe('mapEntries', () => {
     })
   })
 
+  it('caps usable sources at the limit after dropping and dedupe', () => {
+    const result = mapEntries([
+      { rawHref: 'https://example.com/first', title: 'First', snippet: 'One' },
+      { rawHref: 'https://example.com/first', title: 'First dup', snippet: 'One again' },
+      { rawHref: 'https://example.com/second', title: 'Second', snippet: 'Two' },
+      { rawHref: 'https://example.com/third', title: 'Third', snippet: 'Three' },
+    ], 2)
+    assert.deepEqual(result, {
+      sources: [
+        { url: 'https://example.com/first', title: 'First', snippet: 'One' },
+        { url: 'https://example.com/second', title: 'Second', snippet: 'Two' },
+      ],
+      truncated: false,
+    })
+  })
+
+  it('lets junk rows consume no part of the limit', () => {
+    const result = mapEntries([
+      { rawHref: 'javascript:void(0)', title: 'Bad', snippet: '' },
+      { rawHref: 'https://example.com/v1', title: 'V1', snippet: 'S' },
+      { rawHref: 'https://example.com/v2', title: 'V2', snippet: 'S' },
+      { rawHref: 'https://example.com/v3', title: 'V3', snippet: 'S' },
+    ], 3)
+    assert.deepEqual(result.sources.map(source => source.title), ['V1', 'V2', 'V3'])
+  })
+
   it('yields no sources for empty input', () => {
     assert.deepEqual(mapEntries([]), { sources: [], truncated: false })
   })
@@ -224,16 +250,18 @@ describe('parseResults', () => {
     ])
   })
 
-  it('honors the row limit', () => {
-    assert.equal(parseResults(resultsPage(), 1).length, 1)
-  })
-
   it('returns no rows for empty HTML', () => {
     assert.deepEqual(parseResults(''), [])
   })
 
   it('returns no rows for a challenge page without results markup', () => {
     assert.deepEqual(parseResults('<html><body>anomaly</body></html>'), [])
+  })
+
+  it('parses every row regardless of any later cap', () => {
+    // The cap moved to mapEntries; parseResults reports all rows it can.
+    const page = `<div id="links">${organicRow(1)}${organicRow(2)}</div>`
+    assert.equal(parseResults(page).length, 2)
   })
 
   it('skips sponsored rows (any result--ad class)', () => {
@@ -315,11 +343,29 @@ describe('DdgSearchProvider request mapping', () => {
     assert.deepEqual(result.sources.map(source => source.url), ['https://plain.example/p1', 'https://plain.example/p2'])
   })
 
-  it('uses the request maxResults as a parse cap', async () => {
+  it('caps results at the requested maxResults', async () => {
     stubFetch(async () => htmlResponse(resultsPage()))
     const result = await new DdgSearchProvider(options).search({ query: 'q', maxResults: 1 })
     assert.equal(result.sources.length, 1)
     assert.equal(result.sources[0]?.url, 'https://example.com/page')
+  })
+
+  it('caps usable sources, not parsed rows, at maxResults', async () => {
+    const page = `<div id="links">
+      <div class="result results_links results_links_deep web-result">
+        <h2 class="result__title"><a class="result__a" href="javascript:void(0)">Junk row</a></h2>
+        <a class="result__snippet" href="javascript:void(0)">Unusable.</a>
+      </div>
+      ${organicRow(1)}${organicRow(2)}${organicRow(3)}
+    </div>`
+    stubFetch(async () => htmlResponse(page))
+    const result = await new DdgSearchProvider(options).search({ query: 'q', maxResults: 3 })
+    // The junk row must not consume one of the three: all usable rows fit.
+    assert.deepEqual(result.sources.map(source => source.url), [
+      'https://plain.example/p1',
+      'https://plain.example/p2',
+      'https://plain.example/p3',
+    ])
   })
 })
 

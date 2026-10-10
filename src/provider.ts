@@ -142,16 +142,20 @@ export function toSource(entry: DdgScrapeEntry): WebSearchSource | undefined {
 /**
  * Map parsed HTML rows to a normalized search result: decode destinations,
  * drop rows without a title or usable URL, and dedupe by URL while preserving
- * first-seen order. The result reports `truncated: false` — the seam owns the
- * final `maxResults` truncation and sets `truncated` itself.
+ * first-seen order. `limit`, when present, caps the number of *usable*
+ * sources — applied after dropping and dedupe, so junk rows never consume
+ * the bound. The result reports `truncated: false` — the seam owns the final
+ * `maxResults` truncation and sets `truncated` itself.
  *
  * @param entries - the parsed rows, in page order.
- * @returns the normalized, deduped result.
+ * @param limit - optional cap on usable sources; `undefined` = no cap.
+ * @returns the normalized, deduped, capped result.
  */
-export function mapEntries(entries: readonly DdgScrapeEntry[]): WebSearchResult {
+export function mapEntries(entries: readonly DdgScrapeEntry[], limit?: number): WebSearchResult {
   const seen = new Set<string>()
   const sources: WebSearchSource[] = []
   for (const entry of entries) {
+    if (limit !== undefined && sources.length >= limit) break
     const source = toSource(entry)
     if (source === undefined || seen.has(source.url)) continue
     seen.add(source.url)
@@ -254,9 +258,10 @@ export class DdgSearchProvider implements WebSearchProvider {
       throw this.transientFailure(`DuckDuckGo returned an unreadable response body: ${String(error)}`, error)
     }
 
-    // provider-side bound: wins as a cost optimization; the seam caps regardless.
+    // provider-side bound on usable sources, applied after normalization so
+    // junk rows cannot push usable ones past the cut; the seam caps regardless.
     const limit = request.maxResults ?? this.options.maxResults
-    const entries = parseResults(html, limit)
+    const entries = parseResults(html)
 
     // An anomaly page is a 2xx carrying no result markup. A 200 with no rows is
     // a genuinely empty query and stays an empty result; only the anomaly
@@ -266,7 +271,7 @@ export class DdgSearchProvider implements WebSearchProvider {
     }
 
     this.failures = 0
-    return mapEntries(entries)
+    return mapEntries(entries, limit)
   }
 
   /**
@@ -298,20 +303,18 @@ function webAborted(signal: AbortSignal | undefined, fallback: unknown): WebErro
  * class `result`; the title is `a.result__a` and the snippet `a.result__snippet`.
  * Sponsored placements — rows carrying any `result--ad*` class — are skipped:
  * they are paid positions rather than organic results, and their links point
- * at a `y.js` tracking hop instead of a citation target. `limit` bounds the
- * number of parsed rows as a provider-side optimization when present (the seam
- * enforces the request bound regardless).
+ * at a `y.js` tracking hop instead of a citation target. Every row is parsed;
+ * bounding to `maxResults` happens after normalization (see `mapEntries`), so
+ * dropped junk rows cannot push usable ones past the cut.
  *
  * @param html - the response body.
- * @param limit - optional row cap; `undefined` = no cap.
  * @returns the scraped rows, in page order.
  */
-export function parseResults(html: string, limit?: number): DdgScrapeEntry[] {
+export function parseResults(html: string): DdgScrapeEntry[] {
   const entries: DdgScrapeEntry[] = []
   if (html.length === 0) return entries
   const $ = load(html)
   $('#links .result').each((_, elem) => {
-    if (limit !== undefined && entries.length >= limit) return false
     const classes = (($(elem).attr('class')) ?? '').split(/\s+/).filter(cls => cls.length > 0)
     if (classes.some(cls => cls.startsWith('result--ad'))) return true
     const titleEl = $(elem).find('a.result__a')

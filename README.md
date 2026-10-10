@@ -105,7 +105,7 @@ All keys are optional; write them in the `insert` row's `config`.
 | Key | Default | Description |
 | --- | --- | --- |
 | `endpoint` | `https://html.duckduckgo.com/html/` | Results endpoint; `?q=` is appended. Must be an absolute `http(s)` URL; anything else makes the provider unavailable |
-| `maxResults` | (unset) | Row bound applied while parsing, and only when the request carries no `maxResults`. Must be a positive integer; anything else makes the provider unavailable. It counts parsed rows, so junk rows early in the page can push valid ones past the cut |
+| `maxResults` | (unset) | Bound on **usable** sources, applied after rows with blank titles, unusable URLs, sponsored rows, and duplicates are dropped; only takes effect when the request carries no `maxResults`. Must be a positive integer; anything else makes the provider unavailable |
 | `failureThreshold` | `3` | Consecutive transient failures after which the provider reports itself unavailable and lets the seam pick another backend. Must be a positive integer |
 | `cooldownMs` | `300000` (5 min) | How long that unavailability lasts, in milliseconds. Must be a positive integer |
 
@@ -129,7 +129,7 @@ DDG result links are protocol-relative redirect hops (`//duckduckgo.com/l/?uddg=
 
 Sponsored rows — any row carrying a `result--ad*` class — are skipped during parsing: they are paid placements, not organic results, and their links point at a `duckduckgo.com/y.js?...&u3=<encoded>` tracking hop rather than a citation target. Should a sponsored row slip past the class filter after upstream markup drift, the hop decoder unwraps the `u3` carrier the same way as `uddg`; a `y.js` link that cannot be unwrapped to an `http(s)` destination drops the row instead of citing a tracking URL.
 
-The provider always reports `truncated: false`. When a request carries `maxResults`, the provider caps its own parse at that number, so it never over-returns and the seam has nothing to truncate — the flag stays `false` even when the page held more rows than you asked for. A *configured* `maxResults` applies the same way, while parsing, and is invisible to the caller. DDG's static markup carries no generated answer and no publication date, so neither `content` nor `publishedAt` is ever emitted.
+The provider always reports `truncated: false`. When a request carries `maxResults`, the provider caps its **usable** output at that number — junk rows and duplicates never consume the bound — so it never over-returns and the seam has nothing to truncate: the flag stays `false` even when the page held more rows than you asked for. A *configured* `maxResults` applies the same way and is invisible to the caller. DDG's static markup carries no generated answer and no publication date, so neither `content` nor `publishedAt` is ever emitted.
 
 ### Failures and recovery
 
@@ -178,7 +178,7 @@ Three deliberate rules:
 - **Never invent fields.** A blank title drops the row and a blank snippet is omitted rather than set empty, so the seam never presents a fabricated value.
 - **No silent fallback.** Selection stays the seam's job; this package never substitutes another engine.
 
-Flow: `search()` appends `q=` to the configured endpoint and issues a GET with a desktop Chrome user agent and `redirect: 'follow'`, forwarding the caller's `AbortSignal` to the fetch. The body is parsed with Cheerio — rows under `#links .result`, the title in `a.result__a`, the snippet in `a.result__snippet`, sponsored rows (`result--ad*`) skipped — with an optional row cap applied while parsing as a cost optimization. Surviving rows are normalized, deduped by URL in page order, and returned; any failure on the way is classified by retryability and consumes — or spares — the failure budget described above.
+Flow: `search()` appends `q=` to the configured endpoint and issues a GET with a desktop Chrome user agent and `redirect: 'follow'`, forwarding the caller's `AbortSignal` to the fetch. The body is parsed with Cheerio — rows under `#links .result`, the title in `a.result__a`, the snippet in `a.result__snippet`, sponsored rows (`result--ad*`) skipped — and the survivors are bounded to `maxResults` after normalization, so junk rows and duplicates never consume the bound. Surviving rows are normalized, deduped by URL in page order, and returned; any failure on the way is classified by retryability and consumes — or spares — the failure budget described above.
 
 | File | Role |
 | --- | --- |
@@ -195,7 +195,7 @@ These limits define when the provider is a poor fit.
 - **No retry inside the provider** — a single transient failure surfaces to the caller as a structured error; only repetition (the budget) makes the provider step aside. Deciding whether to retry one failed query is the caller's job.
 - **Scraped markup is brittle** — selector drift upstream on an HTTP 200 page degrades to empty results rather than a structured failure, so markup changes look like a poor query.
 - **A row with a blank title or unusable URL is dropped** — there is no portable value to map, so fewer sources than requested can return.
-- **`truncated` is never `true`** — the provider caps its parse at `request.maxResults` (or the configured default), so the seam never sees an over-return and never flips the flag. A caller cannot tell that a page held more results than it received; request more rows if you need to know.
+- **`truncated` is never `true`** — the provider caps its usable output at `request.maxResults` (or the configured default), so the seam never sees an over-return and never flips the flag. A caller cannot tell that a page held more results than it received; request more rows if you need to know.
 - **No `publishedAt`, no `content`** — the static markup carries neither, so publication-date filtering and provider answers are unavailable; the keyed backends do expose them.
 - **Query shaping is not exposed** — region, safesearch, time and type filters, and paging have no provider-neutral service fields to hang on yet; the config surface covers `endpoint`, `maxResults`, and the failure-budget knobs.
 - **Abort classification is error-shape-based** — only a `DOMException` named `AbortError`, or an already-aborted signal, maps to `WEB_ABORTED`; an abort carrying a custom reason surfaces as `WEB_PROVIDER_ERROR`.

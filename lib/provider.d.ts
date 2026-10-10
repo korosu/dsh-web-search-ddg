@@ -58,13 +58,16 @@ export declare function toSource(entry: DdgScrapeEntry): WebSearchSource | undef
 /**
  * Map parsed HTML rows to a normalized search result: decode destinations,
  * drop rows without a title or usable URL, and dedupe by URL while preserving
- * first-seen order. The result reports `truncated: false` — the seam owns the
- * final `maxResults` truncation and sets `truncated` itself.
+ * first-seen order. `limit`, when present, caps the number of *usable*
+ * sources — applied after dropping and dedupe, so junk rows never consume
+ * the bound. The result reports `truncated: false` — the seam owns the final
+ * `maxResults` truncation and sets `truncated` itself.
  *
  * @param entries - the parsed rows, in page order.
- * @returns the normalized, deduped result.
+ * @param limit - optional cap on usable sources; `undefined` = no cap.
+ * @returns the normalized, deduped, capped result.
  */
-export declare function mapEntries(entries: readonly DdgScrapeEntry[]): WebSearchResult;
+export declare function mapEntries(entries: readonly DdgScrapeEntry[], limit?: number): WebSearchResult;
 /**
  * The DuckDuckGo scrape search provider. HTTP redirects are followed by the
  * native fetch (the endpoint 301s between the bare domain and the `html/`
@@ -104,12 +107,11 @@ export declare class DdgSearchProvider implements WebSearchProvider {
  * class `result`; the title is `a.result__a` and the snippet `a.result__snippet`.
  * Sponsored placements — rows carrying any `result--ad*` class — are skipped:
  * they are paid positions rather than organic results, and their links point
- * at a `y.js` tracking hop instead of a citation target. `limit` bounds the
- * number of parsed rows as a provider-side optimization when present (the seam
- * enforces the request bound regardless).
+ * at a `y.js` tracking hop instead of a citation target. Every row is parsed;
+ * bounding to `maxResults` happens after normalization (see `mapEntries`), so
+ * dropped junk rows cannot push usable ones past the cut.
  *
  * @param html - the response body.
- * @param limit - optional row cap; `undefined` = no cap.
  * @returns the scraped rows, in page order.
  */
-export declare function parseResults(html: string, limit?: number): DdgScrapeEntry[];
+export declare function parseResults(html: string): DdgScrapeEntry[];
