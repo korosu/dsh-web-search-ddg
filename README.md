@@ -156,8 +156,8 @@ The package claims dsh releases carrying `@deepseek-ai/dsh-web` `^0.2.0-rc.1 || 
 | dsh release | What was verified |
 | --- | --- |
 | `0.2.0-rc.1` | Full path: installed through `dsh plugin add` into a real profile, booted, and answering live queries |
-| `0.2.0-rc.2` | Contract suite (typecheck + 42 offline tests) against that seam, via `pnpm compat` |
-| `0.2.1-alpha.1` | Contract suite (typecheck + 42 offline tests) against that seam, via `pnpm compat` |
+| `0.2.0-rc.2` | Contract suite (typecheck + 44 offline tests) against that seam, via `pnpm compat` |
+| `0.2.1-alpha.1` | Contract suite (typecheck + 44 offline tests) against that seam, via `pnpm compat` |
 
 Two consequences of semver prerelease rules shape the declared range:
 
@@ -208,7 +208,7 @@ The dev dependencies pin the seam line under test: `@deepseek-ai/dsh-web@0.2.0-r
 
 ```bash
 pnpm install
-pnpm test          # unit + integration, offline (fetch stubbed); 42 tests
+pnpm test          # unit + integration, offline (fetch stubbed); 44 tests
 DDG_E2E=1 pnpm test:e2e   # real-network smoke; self-skips without the flag
 pnpm typecheck
 pnpm peers check   # peer-range sanity against the installed seam line

@@ -220,6 +220,22 @@ describe('DdgSearchProvider request mapping', () => {
     assert.ok(headers?.['user-agent']?.includes('Mozilla/5.0'), `user-agent missing: ${JSON.stringify(headers)}`)
   })
 
+  it('percent-encodes special characters in the query parameter', async () => {
+    const calls = stubFetch(async () => htmlResponse(resultsPage()))
+    await new DdgSearchProvider(options).search({ query: 'C++ "std::vector"' })
+    // `+` must not degrade into a space and quotes/colons must survive the trip.
+    assert.equal(calls[0]?.url, 'https://html.duckduckgo.com/html/?q=C%2B%2B+%22std%3A%3Avector%22')
+  })
+
+  it('percent-encodes a Cyrillic query as UTF-8', async () => {
+    const calls = stubFetch(async () => htmlResponse(resultsPage()))
+    await new DdgSearchProvider(options).search({ query: 'погода Москва' })
+    assert.equal(
+      calls[0]?.url,
+      'https://html.duckduckgo.com/html/?q=%D0%BF%D0%BE%D0%B3%D0%BE%D0%B4%D0%B0+%D0%9C%D0%BE%D1%81%D0%BA%D0%B2%D0%B0',
+    )
+  })
+
   it('forwards the abort signal', async () => {
     const calls = stubFetch(async () => htmlResponse(resultsPage()))
     const controller = new AbortController()

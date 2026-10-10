@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Live e2e case matrix (`DDG_E2E=1`): an English query, a Cyrillic query
+  (non-ASCII percent-encoding through the live endpoint), operators and
+  special characters, the `site:` operator, a `maxResults` cap check, and a
+  no-results query that must stay a well-formed empty answer rather than an
+  error. Live queries are paced 10s apart — DDG answers request bursts from
+  one IP with the HTTP 202 anomaly page, and the suite must exercise result
+  parsing rather than the throttle path. A lone anomaly page is retried once
+  after a full gap (DDG issues the challenge intermittently to a single
+  request even while serving its neighbors), and when the retry draws the
+  anomaly again the case self-skips with the reason: a persistent DDG-side
+  challenge is an environment condition, not a provider defect. Any other
+  error, and any assertion over a served page, still fails the run.
+- Unit tests for query percent-encoding (special characters such as `C++`
+  quotes and colons, and Cyrillic) in the request-mapping suite, pinning the
+  exact wire URL `searchParams` produces.
+
 ## [0.1.4] - 2026-10-08
 
 ### Added

@@ -33,7 +33,7 @@ support, with no bundler); Node 24 is recommended. `pnpm` 11 manages the install
 
 ```bash
 pnpm install
-pnpm test                # 42 tests, offline (fetch is stubbed)
+pnpm test                # 44 tests, offline (fetch is stubbed)
 DDG_E2E=1 pnpm test:e2e  # optional real-network smoke
 pnpm typecheck
 pnpm peers check         # peer-range sanity against the installed seam line

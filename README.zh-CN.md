@@ -156,8 +156,8 @@ HTTP 重定向由原生 fetch 跟随，因为端点会在裸域与 `html/` 路�
 | dsh 发布 | 验证内容 |
 | --- | --- |
 | `0.2.0-rc.1` | 完整路径：通过 `dsh plugin add` 装进真实 profile、启动、并回答真实查询 |
-| `0.2.0-rc.2` | 契约套件（typecheck + 42 个离线测试）对该 seam，经 `pnpm compat` |
-| `0.2.1-alpha.1` | 契约套件（typecheck + 42 个离线测试）对该 seam，经 `pnpm compat` |
+| `0.2.0-rc.2` | 契约套件（typecheck + 44 个离线测试）对该 seam，经 `pnpm compat` |
+| `0.2.1-alpha.1` | 契约套件（typecheck + 44 个离线测试）对该 seam，经 `pnpm compat` |
 
 semver 的预发布规则带来两个影响，直接决定了声明长什么样：
 
@@ -206,7 +206,7 @@ semver 的预发布规则带来两个影响，直接决定了声明长什么样�
 
 ```bash
 pnpm install
-pnpm test          # 单元 + 集成，离线（fetch 被 stub）；42 个测试
+pnpm test          # 单元 + 集成，离线（fetch 被 stub）；44 个测试
 DDG_E2E=1 pnpm test:e2e   # 真实网络 smoke；未设标志时自跳过
 pnpm typecheck
 pnpm peers check   # 针对已安装 seam 线的 peer 范围自检
