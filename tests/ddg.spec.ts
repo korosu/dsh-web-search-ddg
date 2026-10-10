@@ -292,6 +292,20 @@ describe('DdgSearchProvider availability', () => {
   it('is available with a positive integer maxResults', () => {
     assert.equal(new DdgSearchProvider({ ...options, maxResults: 10 }).available(), true)
   })
+
+  it('is unavailable with an invalid timeoutMs', () => {
+    assert.equal(new DdgSearchProvider({ ...options, timeoutMs: 0 }).available(), false)
+    assert.equal(new DdgSearchProvider({ ...options, timeoutMs: 2.5 }).available(), false)
+  })
+
+  it('is available with a positive integer timeoutMs', () => {
+    assert.equal(new DdgSearchProvider({ ...options, timeoutMs: 30_000 }).available(), true)
+  })
+
+  it('is unavailable with an empty userAgent or acceptLanguage', () => {
+    assert.equal(new DdgSearchProvider({ ...options, userAgent: '' }).available(), false)
+    assert.equal(new DdgSearchProvider({ ...options, acceptLanguage: '' }).available(), false)
+  })
 })
 
 describe('DdgSearchProvider request mapping', () => {
@@ -323,11 +337,40 @@ describe('DdgSearchProvider request mapping', () => {
     )
   })
 
-  it('forwards the abort signal', async () => {
+  it('forwards the abort signal to the fetch', async () => {
     const calls = stubFetch(async () => htmlResponse(resultsPage()))
     const controller = new AbortController()
     await new DdgSearchProvider(options).search({ query: 'q' }, controller.signal)
-    assert.equal(calls[0]?.init.signal, controller.signal)
+    const fetchSignal = calls[0]?.init.signal
+    assert.ok(fetchSignal instanceof AbortSignal, 'fetch must carry a signal')
+    assert.equal(fetchSignal.aborted, false)
+    controller.abort()
+    assert.equal(fetchSignal.aborted, true, 'the caller abort must propagate into the fetch signal')
+  })
+
+  it('sends the configured user agent', async () => {
+    const calls = stubFetch(async () => htmlResponse(resultsPage()))
+    await new DdgSearchProvider({ ...options, userAgent: 'TestAgent/9' }).search({ query: 'q' })
+    const headers = calls[0]?.init.headers as Record<string, string> | undefined
+    assert.equal(headers?.['user-agent'], 'TestAgent/9')
+  })
+
+  it('sends accept-language only when configured', async () => {
+    const bare = stubFetch(async () => htmlResponse(resultsPage()))
+    await new DdgSearchProvider(options).search({ query: 'q' })
+    let headers = bare[0]?.init.headers as Record<string, string> | undefined
+    assert.equal('accept-language' in (headers ?? {}), false, 'unset accept-language must not be sent')
+
+    const withLanguage = stubFetch(async () => htmlResponse(resultsPage()))
+    await new DdgSearchProvider({ ...options, acceptLanguage: 'ru-RU,ru;q=0.9' }).search({ query: 'q' })
+    headers = withLanguage[0]?.init.headers as Record<string, string> | undefined
+    assert.equal(headers?.['accept-language'], 'ru-RU,ru;q=0.9')
+  })
+
+  it('arms a request deadline signal by default', async () => {
+    const calls = stubFetch(async () => htmlResponse(resultsPage()))
+    await new DdgSearchProvider(options).search({ query: 'q' })
+    assert.ok(calls[0]?.init.signal instanceof AbortSignal, 'a deadline signal must always be armed')
   })
 
   it('returns the parsed sources for a successful page', async () => {
@@ -482,6 +525,30 @@ describe('DdgSearchProvider error handling', () => {
       new DdgSearchProvider(options).search({ query: 'q' }),
       rejectsWithCode('WEB_ABORTED'),
     )
+  })
+
+  it('times out a hung request as a transient failure that consumes the budget', async () => {
+    stubFetch((_, init) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => {
+        reject((init.signal as AbortSignal).reason)
+      }, { once: true })
+    }))
+    const provider = new DdgSearchProvider({ ...options, timeoutMs: 1, failureThreshold: 1, cooldownMs: 60_000 })
+    await assert.rejects(provider.search({ query: 'q' }), rejectsWithCode('WEB_PROVIDER_ERROR'))
+    assert.equal(provider.available(), false, 'the timeout consumed the budget and opened the cooldown')
+  })
+
+  it('still maps a caller abort to WEB_ABORTED while a deadline is armed', async () => {
+    stubFetch((_, init) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => {
+        reject((init.signal as AbortSignal).reason)
+      }, { once: true })
+    }))
+    const provider = new DdgSearchProvider({ ...options, timeoutMs: 60_000 })
+    const controller = new AbortController()
+    const pending = provider.search({ query: 'q' }, controller.signal)
+    controller.abort()
+    await assert.rejects(pending, rejectsWithCode('WEB_ABORTED'))
   })
 
   it('returns empty sources for a success page without parseable results', async () => {

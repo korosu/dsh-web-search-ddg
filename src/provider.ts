@@ -30,8 +30,20 @@ export const DDG_PROVIDER_ID = 'ddg'
 /** Default results endpoint; the static HTML mirror, not the JS app. */
 export const DDG_DEFAULT_ENDPOINT = 'https://html.duckduckgo.com/html/'
 
-/** Desktop Chrome user agent — the static endpoint serves richer results to it. */
-const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+/**
+ * Default request user agent — desktop Chrome, the shape the static endpoint
+ * serves richest results to (and the UA the live endpoint was verified with).
+ * A deployment can override it with the `userAgent` config key; a stale or
+ * unusual UA is itself a bot signal, so the knob matters operationally.
+ */
+export const DDG_DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+
+/**
+ * Default per-request deadline in milliseconds. The slow-but-served responses
+ * observed live (DDG tarpits) ran 9–20s, so a 30s bound lets every served
+ * response through while a hung connection cannot outlive the call.
+ */
+export const DDG_DEFAULT_TIMEOUT_MS = 30_000
 
 /**
  * Consecutive transient failures after which the provider declares itself
@@ -47,6 +59,12 @@ export interface DdgSearchProviderOptions {
   endpoint: string
   /** Default result limit when a request carries no `maxResults`. */
   maxResults?: number
+  /** Request user agent; defaults to {@link DDG_DEFAULT_USER_AGENT}. */
+  userAgent?: string
+  /** `accept-language` header value; unset = the header is not sent. */
+  acceptLanguage?: string
+  /** Per-request deadline in milliseconds; a timeout is a transient failure. */
+  timeoutMs?: number
   /** Consecutive transient failures before the provider goes on cooldown. */
   failureThreshold?: number
   /** Cooldown length in milliseconds once the threshold is reached. */
@@ -193,6 +211,10 @@ function isTransientStatus(status: number): boolean {
  * the provider reports itself unavailable for a cooldown so the seam can pick
  * another backend instead of failing every call. Any other 4xx is a
  * configuration error, fails identically on every retry, and is never counted.
+ *
+ * Every request carries a deadline (`timeoutMs`, default 30s) composed with the
+ * caller's abort signal through `AbortSignal.any`: a caller abort still maps to
+ * `WEB_ABORTED`, while a timed-out request surfaces as a transient failure.
  */
 export class DdgSearchProvider implements WebSearchProvider {
   readonly id = DDG_PROVIDER_ID
@@ -212,6 +234,9 @@ export class DdgSearchProvider implements WebSearchProvider {
   /**
    * Cheap local usability check; must not make network calls. False while the
    * failure-budget cooldown is open, so the seam can select another provider.
+   * String knobs must be non-empty and numeric knobs positive whole numbers —
+   * the same rules the schema applies at load time, re-checked here because
+   * `search()` may also be called through a direct provider reference.
    */
   available(): boolean {
     if (this.cooldownUntil !== 0) {
@@ -223,17 +248,30 @@ export class DdgSearchProvider implements WebSearchProvider {
     return URL.canParse(this.options.endpoint)
       && (this.options.endpoint.startsWith('http://') || this.options.endpoint.startsWith('https://'))
       && (this.options.maxResults === undefined || isPositiveInteger(this.options.maxResults))
+      && (this.options.userAgent === undefined || this.options.userAgent.length > 0)
+      && (this.options.acceptLanguage === undefined || this.options.acceptLanguage.length > 0)
+      && (this.options.timeoutMs === undefined || isPositiveInteger(this.options.timeoutMs))
   }
 
   async search(request: WebSearchRequest, signal?: AbortSignal): Promise<WebSearchResult> {
     const url = new URL(this.options.endpoint)
     url.searchParams.set('q', request.query)
+    // Every request carries a deadline (`timeoutMs`, default 30s) composed
+    // with the caller's abort via AbortSignal.any. When the caller aborts, the
+    // rejection carries the caller's reason and classifies as WEB_ABORTED;
+    // when the deadline fires, it carries a TimeoutError — not an AbortError —
+    // so it classifies as a transient failure and consumes the budget.
+    const deadline = AbortSignal.timeout(this.options.timeoutMs ?? DDG_DEFAULT_TIMEOUT_MS)
+    const fetchSignal = signal !== undefined ? AbortSignal.any([signal, deadline]) : deadline
     let response: Response
     try {
       response = await fetch(url.toString(), {
         redirect: 'follow',
-        headers: { 'user-agent': USER_AGENT },
-        ...signal !== undefined ? { signal } : {},
+        headers: {
+          'user-agent': this.options.userAgent ?? DDG_DEFAULT_USER_AGENT,
+          ...this.options.acceptLanguage !== undefined ? { 'accept-language': this.options.acceptLanguage } : {},
+        },
+        signal: fetchSignal,
       })
     } catch (error: unknown) {
       if (signal?.aborted === true || isAbortError(error)) throw webAborted(signal, error)

@@ -106,6 +106,9 @@ All keys are optional; write them in the `insert` row's `config`.
 | --- | --- | --- |
 | `endpoint` | `https://html.duckduckgo.com/html/` | Results endpoint; `?q=` is appended. Must be an absolute `http(s)` URL; anything else makes the provider unavailable |
 | `maxResults` | (unset) | Bound on **usable** sources, applied after rows with blank titles, unusable URLs, sponsored rows, and duplicates are dropped; only takes effect when the request carries no `maxResults`. Must be a positive integer; anything else makes the provider unavailable |
+| `userAgent` | desktop Chrome 124 (the live-verified UA) | Request user agent. The default is the UA the live endpoint was verified with; a stale or unusual UA is itself a bot signal, so the knob matters operationally. Must be non-empty when present |
+| `acceptLanguage` | (unset) | `accept-language` header value sent with every request; unset = the header is not sent. Must be non-empty when present |
+| `timeoutMs` | `30000` | Per-request deadline, in milliseconds; a timed-out request is a transient failure and consumes the failure budget. The slow-but-served responses observed live ran 9–20s, so the default lets them through. Must be a positive integer |
 | `failureThreshold` | `3` | Consecutive transient failures after which the provider reports itself unavailable and lets the seam pick another backend. Must be a positive integer |
 | `cooldownMs` | `300000` (5 min) | How long that unavailability lasts, in milliseconds. Must be a positive integer |
 
@@ -139,13 +142,14 @@ The provider always reports `truncated: false`. When a request carries `maxResul
 | HTTP 403 / 429 / 5xx | `WebError` `WEB_PROVIDER_ERROR`, counted toward the failure budget |
 | Any other HTTP non-2xx | `WebError` `WEB_PROVIDER_ERROR`, **not counted** — a configuration-style failure retries identically |
 | Challenge / anomaly page (HTTP 202, no result markup) | `WebError` `WEB_PROVIDER_ERROR` naming the anomaly page, counted toward the failure budget |
+| Request exceeded its `timeoutMs` deadline | `WebError` `WEB_PROVIDER_ERROR`, counted toward the failure budget |
 | Aborted request | `WebError` `WEB_ABORTED`, never counted |
 | Failure budget spent (`failureThreshold` consecutive transient failures) | The provider reports itself unavailable for `cooldownMs`. A pinned deployment sees `WEB_PROVIDER_CONFIGURED_UNAVAILABLE`; an unpinned one falls back to any other registered backend, or gets `WEB_PROVIDER_UNAVAILABLE` if there is none |
 | `endpoint` not an absolute `http(s)` URL, or a numeric config not a positive integer | `WebError` `WEB_PROVIDER_CONFIGURED_UNAVAILABLE` — registered, but refuses to run |
 | Pin kept, bundle removed | `WebError` `WEB_PROVIDER_CONFIGURED_MISSING` |
 | Pin removed while both search backends are registered | `WebError` `WEB_PROVIDER_AMBIGUOUS` |
 
-HTTP redirects are followed by the native fetch, because the endpoint moves between the bare domain and the `html/` path. An abort — a `DOMException` named `AbortError`, or an already-aborted signal — becomes `WEB_ABORTED`; anything else becomes `WEB_PROVIDER_ERROR`.
+HTTP redirects are followed by the native fetch, because the endpoint moves between the bare domain and the `html/` path. An abort — a `DOMException` named `AbortError`, or an already-aborted signal — becomes `WEB_ABORTED`; anything else becomes `WEB_PROVIDER_ERROR`. Every request also carries a deadline: a timed-out request rejects with a `TimeoutError`, which is not an abort — it becomes a transient `WEB_PROVIDER_ERROR` and consumes the budget.
 
 **The failure budget is the throttling signal.** A challenge page, a rate limit, or a transport failure is distinguishable from a genuinely empty query: the empty query returns an empty result, throttling raises a structured error, and once the same kind of failure repeats `failureThreshold` times in a row the provider stops offering itself for `cooldownMs` so the seam can route around it. Any success — including a genuinely empty result — clears the counter, and when the cooldown elapses the provider comes back with a fresh budget rather than staying tripped.
 
@@ -178,7 +182,7 @@ Three deliberate rules:
 - **Never invent fields.** A blank title drops the row and a blank snippet is omitted rather than set empty, so the seam never presents a fabricated value.
 - **No silent fallback.** Selection stays the seam's job; this package never substitutes another engine.
 
-Flow: `search()` appends `q=` to the configured endpoint and issues a GET with a desktop Chrome user agent and `redirect: 'follow'`, forwarding the caller's `AbortSignal` to the fetch. The body is parsed with Cheerio — rows under `#links .result`, the title in `a.result__a`, the snippet in `a.result__snippet`, sponsored rows (`result--ad*`) skipped — and the survivors are bounded to `maxResults` after normalization, so junk rows and duplicates never consume the bound. Surviving rows are normalized, deduped by URL in page order, and returned; any failure on the way is classified by retryability and consumes — or spares — the failure budget described above.
+Flow: `search()` appends `q=` to the configured endpoint and issues a GET with the configured user agent (the live-verified desktop Chrome UA by default) and an optional `accept-language` header, under a per-request deadline composed with the caller's `AbortSignal` through `AbortSignal.any`. The body is parsed with Cheerio — rows under `#links .result`, the title in `a.result__a`, the snippet in `a.result__snippet`, sponsored rows (`result--ad*`) skipped — and the survivors are bounded to `maxResults` after normalization, so junk rows and duplicates never consume the bound. Surviving rows are normalized, deduped by URL in page order, and returned; any failure on the way is classified by retryability and consumes — or spares — the failure budget described above.
 
 | File | Role |
 | --- | --- |

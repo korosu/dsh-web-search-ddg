@@ -106,6 +106,9 @@ peerDependencyRules:
 | --- | --- | --- |
 | `endpoint` | `https://html.duckduckgo.com/html/` | 结果端点，追加 `?q=`。必须是绝对 `http(s)` URL；其他任何值都会使提供方不可用 |
 | `maxResults` | （未设置） | **可用**来源的上限，在丢弃空标题、URL 不可用、赞助行与重复行之后施加；仅在请求未携带 `maxResults` 时生效。必须是正整数；其他任何值都会使提供方不可用 |
+| `userAgent` | 桌面版 Chrome 124（活体验证过的 UA） | 请求 user agent。默认值是活体端点验证时使用的 UA；过期或异常的 UA 本身就是机器人信号，所以这个旋钮在运维上很重要。存在时必须非空 |
+| `acceptLanguage` | （未设置） | 随每个请求发送的 `accept-language` 头的值；未设置 = 不发送该头。存在时必须非空 |
+| `timeoutMs` | `30000` | 单请求截止时间（毫秒）；超时的请求是瞬态失败并计入失败预算。实测慢但仍被正常服务的响应为 9–20 秒，默认值可放行。必须是正整数 |
 | `failureThreshold` | `3` | 连续多少次瞬态失败后，提供方把自己声明为不可用，让 seam 去选择别的后端。必须是正整数 |
 | `cooldownMs` | `300000`（5 分钟） | 上述不可状态的持续时间，以毫秒计。必须是正整数 |
 
@@ -139,13 +142,14 @@ DDG 结果链接是协议相对的重定向跳转（`//duckduckgo.com/l/?uddg=<e
 | HTTP 403 / 429 / 5xx | `WebError` `WEB_PROVIDER_ERROR`，计入失败预算 |
 | 其余 HTTP 非 2xx | `WebError` `WEB_PROVIDER_ERROR`，**不计入**——配置型失败重试结果完全相同 |
 | 质询／异常页面（HTTP 202，无结果标记） | `WebError` `WEB_PROVIDER_ERROR`，指明异常页，计入失败预算 |
+| 请求超出 `timeoutMs` 截止时间 | `WebError` `WEB_PROVIDER_ERROR`，计入失败预算 |
 | 请求被中止 | `WebError` `WEB_ABORTED`，永不计入 |
 | 失败预算耗尽（连续 `failureThreshold` 次瞬态失败） | 提供方在 `cooldownMs` 内声明自己不可用。固定的部署看到 `WEB_PROVIDER_CONFIGURED_UNAVAILABLE`；未固定的部署回退到任何其他已注册后端，若没有则得到 `WEB_PROVIDER_UNAVAILABLE` |
 | `endpoint` 不是绝对 `http(s)` URL，或数值配置不是正整数 | `WebError` `WEB_PROVIDER_CONFIGURED_UNAVAILABLE` —— 已注册，但拒绝运行 |
 | 保留固定却移除了本捆绑包 | `WebError` `WEB_PROVIDER_CONFIGURED_MISSING` |
 | 两个搜索后端都注册着却移除了固定 | `WebError` `WEB_PROVIDER_AMBIGUOUS` |
 
-HTTP 重定向由原生 fetch 跟随，因为端点会在裸域与 `html/` 路径之间迁移。中止——名为 `AbortError` 的 `DOMException`，或已中止的信号——变为 `WEB_ABORTED`；其余一切变为 `WEB_PROVIDER_ERROR`。
+HTTP 重定向由原生 fetch 跟随，因为端点会在裸域与 `html/` 路径之间迁移。中止——名为 `AbortError` 的 `DOMException`，或已中止的信号——变为 `WEB_ABORTED`；其余一切变为 `WEB_PROVIDER_ERROR`。每个请求还携带截止时间：超时的请求以 `TimeoutError` 拒绝——那不是中止——因此成为瞬态 `WEB_PROVIDER_ERROR` 并消耗失败预算。
 
 **失败预算就是限流信号。** 质询页、限流、传输失败都与真正的空查询可区分：空查询返回空结果，限流抛出结构化错误，而同类失败连续重复 `failureThreshold` 次后，提供方在 `cooldownMs` 内不再自荐，让 seam 绕开它。任何成功——包括真正的空结果——都会清零计数；冷却期满后提供方带着全新的预算回来，而不是保持跳闸。
 
@@ -178,7 +182,7 @@ semver 的预发布规则带来两个影响，直接决定了声明长什么样�
 - **绝不臆造字段**——空标题会丢弃该行，空白 snippet 会被省略而非置空，因此 seam 从不呈现捏造的值。
 - **没有静默回退**——选择权始终属于 seam，本包从不替换为另一个引擎。
 
-流程：`search()` 把 `q=` 追加到配置的 endpoint，以桌面版 Chrome user agent 和 `redirect: 'follow'` 发起 GET，并把调用方的 `AbortSignal` 转发给 fetch。正文用 Cheerio 解析——行位于 `#links .result` 下，标题取 `a.result__a`，摘要取 `a.result__snippet`，赞助行（`result--ad*`）被跳过——存活行在规范化之后按 `maxResults` 截断，因此垃圾行与重复项永远不会消耗该限额。存活行被规范化、按 URL 去重并保持页面顺序，然后返回；途中任何失败都按「可否重试」分类，并据此消耗——或不消耗——上文所述的失败预算。
+流程：`search()` 把 `q=` 追加到配置的 endpoint，以配置的 user agent（默认为活体验证过的桌面版 Chrome UA）与可选的 `accept-language` 头发起 GET，请求截止时间通过 `AbortSignal.any` 与调用方的 `AbortSignal` 组合。正文用 Cheerio 解析——行位于 `#links .result` 下，标题取 `a.result__a`，摘要取 `a.result__snippet`，赞助行（`result--ad*`）被跳过——存活行在规范化之后按 `maxResults` 截断，因此垃圾行与重复项永远不会消耗该限额。存活行被规范化、按 URL 去重并保持页面顺序，然后返回；途中任何失败都按「可否重试」分类，并据此消耗——或不消耗——上文所述的失败预算。
 
 | 文件 | 角色 |
 | --- | --- |

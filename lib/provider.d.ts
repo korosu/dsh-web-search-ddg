@@ -19,12 +19,31 @@ import type { DdgScrapeEntry } from './types.ts';
 export declare const DDG_PROVIDER_ID = "ddg";
 /** Default results endpoint; the static HTML mirror, not the JS app. */
 export declare const DDG_DEFAULT_ENDPOINT = "https://html.duckduckgo.com/html/";
+/**
+ * Default request user agent — desktop Chrome, the shape the static endpoint
+ * serves richest results to (and the UA the live endpoint was verified with).
+ * A deployment can override it with the `userAgent` config key; a stale or
+ * unusual UA is itself a bot signal, so the knob matters operationally.
+ */
+export declare const DDG_DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+/**
+ * Default per-request deadline in milliseconds. The slow-but-served responses
+ * observed live (DDG tarpits) ran 9–20s, so a 30s bound lets every served
+ * response through while a hung connection cannot outlive the call.
+ */
+export declare const DDG_DEFAULT_TIMEOUT_MS = 30000;
 /** Resolved provider options (the plugin's `apply` supplies defaults). */
 export interface DdgSearchProviderOptions {
     /** Results endpoint; `?q=` is appended. Must be an absolute http/https URL. */
     endpoint: string;
     /** Default result limit when a request carries no `maxResults`. */
     maxResults?: number;
+    /** Request user agent; defaults to {@link DDG_DEFAULT_USER_AGENT}. */
+    userAgent?: string;
+    /** `accept-language` header value; unset = the header is not sent. */
+    acceptLanguage?: string;
+    /** Per-request deadline in milliseconds; a timeout is a transient failure. */
+    timeoutMs?: number;
     /** Consecutive transient failures before the provider goes on cooldown. */
     failureThreshold?: number;
     /** Cooldown length in milliseconds once the threshold is reached. */
@@ -80,6 +99,10 @@ export declare function mapEntries(entries: readonly DdgScrapeEntry[], limit?: n
  * the provider reports itself unavailable for a cooldown so the seam can pick
  * another backend instead of failing every call. Any other 4xx is a
  * configuration error, fails identically on every retry, and is never counted.
+ *
+ * Every request carries a deadline (`timeoutMs`, default 30s) composed with the
+ * caller's abort signal through `AbortSignal.any`: a caller abort still maps to
+ * `WEB_ABORTED`, while a timed-out request surfaces as a transient failure.
  */
 export declare class DdgSearchProvider implements WebSearchProvider {
     readonly id = "ddg";
@@ -92,6 +115,9 @@ export declare class DdgSearchProvider implements WebSearchProvider {
     /**
      * Cheap local usability check; must not make network calls. False while the
      * failure-budget cooldown is open, so the seam can select another provider.
+     * String knobs must be non-empty and numeric knobs positive whole numbers —
+     * the same rules the schema applies at load time, re-checked here because
+     * `search()` may also be called through a direct provider reference.
      */
     available(): boolean;
     search(request: WebSearchRequest, signal?: AbortSignal): Promise<WebSearchResult>;

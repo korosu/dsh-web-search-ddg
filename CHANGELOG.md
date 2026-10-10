@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Config keys for request shaping: `userAgent` (default: the live-verified
+  desktop Chrome UA — previously hardcoded, in violation of the package's own
+  no-hardcoded-tunables rule), `acceptLanguage` (unset = the header is not
+  sent), and `timeoutMs` (default 30000). Every request now arms a deadline
+  composed with the caller's `AbortSignal` via `AbortSignal.any`: a caller
+  abort still maps to `WEB_ABORTED`, while a timed-out request surfaces as a
+  transient `WEB_PROVIDER_ERROR` that consumes the failure budget. An empty
+  `userAgent` or `acceptLanguage`, or a non-positive-integer `timeoutMs`,
+  makes the provider report itself unavailable, like the other config keys.
+
 ### Changed
 
 - `maxResults` (configured or per-request) now bounds **usable** sources,
