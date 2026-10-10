@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Sponsored result rows no longer reach answers: rows carrying any
+  `result--ad*` class are skipped during parsing, and the sponsored redirect
+  carrier (`duckduckgo.com/y.js?...&u3=...`) is unwrapped through the same hop
+  decoder as `uddg` — a `y.js` link that cannot be unwrapped to an `http(s)`
+  destination drops the row instead of citing a tracking URL. No sponsored
+  rows were served to the live verification network, so the filter follows
+  DDG's documented ad markup and stays inert while the endpoint serves no
+  ads.
+- A redirect hop whose decoded target is itself a DDG redirect is now
+  unwrapped recursively (up to three levels), so a nested `uddg` chain cites
+  the final page instead of an intermediate URL.
+- Destinations are now returned canonicalized — the decoded target is
+  re-parsed through `URL` — so a hop carrying unencoded characters (a literal
+  space in the path, for example) surfaces as a valid URL instead of a raw
+  decoded string.
+
 ## [0.1.5] - 2026-10-09
 
 ### Added

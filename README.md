@@ -125,7 +125,9 @@ pins the provider without touching any patch row; the config key wins when both 
 
 Each row of the results page maps to a `WebSearchSource`: `url`, `title`, and, when non-blank, `snippet`. A row with a blank title or an unusable URL is dropped, and duplicates collapse to their first-seen URL, so a call can return fewer sources than requested.
 
-DDG result links are protocol-relative redirect hops (`//duckduckgo.com/l/?uddg=<encoded>&rut=...`). The provider decodes `uddg` back to the real destination, so the tool cites the actual page rather than the intermediate URL. This is a pure string operation — a result hop is never fetched.
+DDG result links are protocol-relative redirect hops (`//duckduckgo.com/l/?uddg=<encoded>&rut=...`). The provider decodes the redirect parameter back to the real destination, so the tool cites the actual page rather than the intermediate URL. This is a pure string operation — a result hop is never fetched. A hop whose decoded target is itself a DDG redirect is unwrapped too (up to three levels), and the final destination is returned canonicalized — re-parsed through `URL` — so the consumer always receives a valid absolute URL.
+
+Sponsored rows — any row carrying a `result--ad*` class — are skipped during parsing: they are paid placements, not organic results, and their links point at a `duckduckgo.com/y.js?...&u3=<encoded>` tracking hop rather than a citation target. Should a sponsored row slip past the class filter after upstream markup drift, the hop decoder unwraps the `u3` carrier the same way as `uddg`; a `y.js` link that cannot be unwrapped to an `http(s)` destination drops the row instead of citing a tracking URL.
 
 The provider always reports `truncated: false`. When a request carries `maxResults`, the provider caps its own parse at that number, so it never over-returns and the seam has nothing to truncate — the flag stays `false` even when the page held more rows than you asked for. A *configured* `maxResults` applies the same way, while parsing, and is invisible to the caller. DDG's static markup carries no generated answer and no publication date, so neither `content` nor `publishedAt` is ever emitted.
 
@@ -172,11 +174,11 @@ The 0.1.x seam lines are **not claimed**, deliberately. The provider contract it
 
 Three deliberate rules:
 
-- **Cite the destination, not the hop.** Decoding `uddg` keeps the model and the UI pointing at the real page with no extra request.
+- **Cite the destination, not the hop.** Decoding `uddg` — and the sponsored `y.js`/`u3` carrier, nested up to three levels — keeps the model and the UI pointing at the real page with no extra request.
 - **Never invent fields.** A blank title drops the row and a blank snippet is omitted rather than set empty, so the seam never presents a fabricated value.
 - **No silent fallback.** Selection stays the seam's job; this package never substitutes another engine.
 
-Flow: `search()` appends `q=` to the configured endpoint and issues a GET with a desktop Chrome user agent and `redirect: 'follow'`, forwarding the caller's `AbortSignal` to the fetch. The body is parsed with Cheerio — rows under `#links .result`, the title in `a.result__a`, the snippet in `a.result__snippet` — with an optional row cap applied while parsing as a cost optimization. Surviving rows are normalized, deduped by URL in page order, and returned; any failure on the way is classified by retryability and consumes — or spares — the failure budget described above.
+Flow: `search()` appends `q=` to the configured endpoint and issues a GET with a desktop Chrome user agent and `redirect: 'follow'`, forwarding the caller's `AbortSignal` to the fetch. The body is parsed with Cheerio — rows under `#links .result`, the title in `a.result__a`, the snippet in `a.result__snippet`, sponsored rows (`result--ad*`) skipped — with an optional row cap applied while parsing as a cost optimization. Surviving rows are normalized, deduped by URL in page order, and returned; any failure on the way is classified by retryability and consumes — or spares — the failure budget described above.
 
 | File | Role |
 | --- | --- |
@@ -194,7 +196,6 @@ These limits define when the provider is a poor fit.
 - **Scraped markup is brittle** — selector drift upstream on an HTTP 200 page degrades to empty results rather than a structured failure, so markup changes look like a poor query.
 - **A row with a blank title or unusable URL is dropped** — there is no portable value to map, so fewer sources than requested can return.
 - **`truncated` is never `true`** — the provider caps its parse at `request.maxResults` (or the configured default), so the seam never sees an over-return and never flips the flag. A caller cannot tell that a page held more results than it received; request more rows if you need to know.
-- **The `uddg` redirect is decoded one level** — a hop whose decoded target is itself a DDG redirect is returned unwrapped, so a double-nested hop surfaces as an intermediate URL rather than the final page.
 - **No `publishedAt`, no `content`** — the static markup carries neither, so publication-date filtering and provider answers are unavailable; the keyed backends do expose them.
 - **Query shaping is not exposed** — region, safesearch, time and type filters, and paging have no provider-neutral service fields to hang on yet; the config surface covers `endpoint`, `maxResults`, and the failure-budget knobs.
 - **Abort classification is error-shape-based** — only a `DOMException` named `AbortError`, or an already-aborted signal, maps to `WEB_ABORTED`; an abort carrying a custom reason surfaces as `WEB_PROVIDER_ERROR`.

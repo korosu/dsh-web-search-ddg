@@ -64,6 +64,33 @@ function resultsPage(): string {
     </div>`
 }
 
+/** One numbered organic result row for ad-filter and cap tests. */
+function organicRow(n: number): string {
+  return `
+      <div class="result results_links results_links_deep web-result">
+        <div class="links_main links_deep result__body">
+          <h2 class="result__title">
+            <a class="result__a" href="https://plain.example/p${n}">Organic ${n}</a>
+          </h2>
+          <a class="result__snippet" href="https://plain.example/p${n}">Snippet ${n}.</a>
+        </div>
+      </div>`
+}
+
+/** A sponsored row in DDG's ad-markup shape: result--ad class, y.js link hop. */
+function sponsoredRow(): string {
+  const hop = '//duckduckgo.com/y.js?ad_provider=bing&ad_domain=example.com&u3=https%3A%2F%2Fsponsor.example%2Foffer'
+  return `
+      <div class="result result--ad results_links results_links_deep web-result">
+        <div class="links_main links_deep result__body">
+          <h2 class="result__title">
+            <a class="result__a" href="${hop}">Sponsored offer</a>
+          </h2>
+          <a class="result__snippet" href="${hop}">Buy now.</a>
+        </div>
+      </div>`
+}
+
 /** Assertion helper: the rejected error must carry a WebError code and optional message pattern. */
 function rejectsWithCode(code: string, messagePattern?: RegExp): (err: unknown) => boolean {
   return (err: unknown): boolean => {
@@ -82,10 +109,12 @@ describe('resolveDestination', () => {
     )
   })
 
-  it('decodes an absolute DDG redirect URL', () => {
+  it('decodes an absolute DDG redirect URL, canonicalized', () => {
     assert.equal(
       resolveDestination('https://duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fa%20b&rut=abc'),
-      'https://example.com/a b',
+      // The decoded target is re-parsed through URL, so the literal space in
+      // the path surfaces percent-encoded — the consumer gets a valid URL.
+      'https://example.com/a%20b',
     )
   })
 
@@ -95,6 +124,30 @@ describe('resolveDestination', () => {
 
   it('handles an already-decoded uddg value', () => {
     assert.equal(resolveDestination('//duckduckgo.com/l/?uddg=https://example.com/page&rut=abc'), 'https://example.com/page')
+  })
+
+  it('decodes a sponsored y.js redirect hop through u3', () => {
+    assert.equal(
+      resolveDestination('//duckduckgo.com/y.js?ad_provider=bing&ad_domain=example.com&u3=https%3A%2F%2Fsponsor.example%2Foffer&rut=abc'),
+      'https://sponsor.example/offer',
+    )
+  })
+
+  it('drops a y.js hop without a usable u3 destination', () => {
+    assert.equal(resolveDestination('//duckduckgo.com/y.js?ad_provider=bing'), undefined)
+    assert.equal(resolveDestination('//duckduckgo.com/y.js?u3=javascript%3Aalert(1)'), undefined)
+  })
+
+  it('unwraps a nested redirect chain to the final destination', () => {
+    const inner = 'https://duckduckgo.com/l/?uddg=' + encodeURIComponent('https://example.com/final')
+    const outer = 'https://duckduckgo.com/l/?uddg=' + encodeURIComponent(inner)
+    assert.equal(resolveDestination(outer), 'https://example.com/final')
+  })
+
+  it('reports a chain deeper than the hop limit unusable', () => {
+    let link = 'https://example.com/deepest'
+    for (let i = 0; i < 4; i++) link = 'https://duckduckgo.com/l/?uddg=' + encodeURIComponent(link)
+    assert.equal(resolveDestination(link), undefined)
   })
 
   it('returns undefined for empty href', () => {
@@ -182,6 +235,12 @@ describe('parseResults', () => {
   it('returns no rows for a challenge page without results markup', () => {
     assert.deepEqual(parseResults('<html><body>anomaly</body></html>'), [])
   })
+
+  it('skips sponsored rows (any result--ad class)', () => {
+    const page = `<div id="links">${sponsoredRow()}${organicRow(1)}${organicRow(2)}</div>`
+    const entries = parseResults(page)
+    assert.deepEqual(entries.map(entry => entry.title), ['Organic 1', 'Organic 2'])
+  })
 })
 
 describe('DdgSearchProvider availability', () => {
@@ -248,6 +307,12 @@ describe('DdgSearchProvider request mapping', () => {
     const result = await new DdgSearchProvider(options).search({ query: 'q' })
     assert.deepEqual(result.sources.map(s => s.url), ['https://example.com/page', 'https://plain.example/direct'])
     assert.equal(result.truncated, false)
+  })
+
+  it('drops sponsored rows from a served page', async () => {
+    stubFetch(async () => htmlResponse(`<div id="links">${sponsoredRow()}${organicRow(1)}${organicRow(2)}</div>`))
+    const result = await new DdgSearchProvider(options).search({ query: 'insurance' })
+    assert.deepEqual(result.sources.map(source => source.url), ['https://plain.example/p1', 'https://plain.example/p2'])
   })
 
   it('uses the request maxResults as a parse cap', async () => {

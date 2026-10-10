@@ -5,10 +5,12 @@
  *
  * The DDG result links are protocol-relative redirect URLs
  * (`//duckduckgo.com/l/?uddg=<encoded>&rut=...`); this provider decodes the
- * `uddg` parameter back to the real destination so the tool consumer displays
- * and cites the actual page, not the intermediate hop. Row mapping, URL
- * handling, and the fetch-and-error path are separated so parsing can be unit
- * tested without a network.
+ * redirect parameter — `uddg` on the organic `/l/` carrier, `u3` on the
+ * sponsored `y.js` carrier — back to the real destination so the tool
+ * consumer displays and cites the actual page, not the intermediate hop.
+ * Sponsored rows are filtered out during parsing; row mapping, URL handling,
+ * and the fetch-and-error path are separated so parsing can be unit tested
+ * without a network.
  * @module @deepseek-ai/dsh-web-search-ddg/provider
  */
 import type { WebSearchProvider, WebSearchRequest, WebSearchResult, WebSearchSource } from '@deepseek-ai/dsh-web';
@@ -29,10 +31,16 @@ export interface DdgSearchProviderOptions {
     cooldownMs?: number;
 }
 /**
- * Extract the real destination from a DDG redirect URL, or `undefined` when the
- * value is not a usable `http(s)` URL. Accepts both protocol-relative
- * (`//duckduckgo.com/l/?uddg=...`) and absolute redirect targets, plus plain
- * absolute URLs (DDG may return direct links).
+ * Extract the real destination from a DDG link, or `undefined` when the value
+ * is not a usable `http(s)` URL. Accepts protocol-relative (`//host/…`) and
+ * absolute targets, plain absolute URLs, and DDG's two redirect carriers: the
+ * organic result hop (`duckduckgo.com/l/?uddg=<encoded>`) and the sponsored
+ * hop (`duckduckgo.com/y.js?…&u3=<encoded>`, the link shape sponsored rows
+ * carry when the endpoint serves ads). A hop whose decoded target is itself a
+ * DDG redirect is unwrapped too, up to {@link MAX_REDIRECT_HOPS} levels; a
+ * deeper chain surfaces as `undefined`. The surviving destination is returned
+ * canonicalized — re-parsed through `URL` — so the consumer always receives a
+ * valid absolute URL.
  *
  * @param rawHref - the raw `href` from a result row.
  * @returns the destination, or `undefined` when nothing usable is present.
@@ -94,8 +102,11 @@ export declare class DdgSearchProvider implements WebSearchProvider {
 /**
  * Parse the DDG static results page into rows. Rows live under `#links` with
  * class `result`; the title is `a.result__a` and the snippet `a.result__snippet`.
- * `limit` bounds the number of parsed rows as a provider-side optimization when
- * present (the seam enforces the request bound regardless).
+ * Sponsored placements — rows carrying any `result--ad*` class — are skipped:
+ * they are paid positions rather than organic results, and their links point
+ * at a `y.js` tracking hop instead of a citation target. `limit` bounds the
+ * number of parsed rows as a provider-side optimization when present (the seam
+ * enforces the request bound regardless).
  *
  * @param html - the response body.
  * @param limit - optional row cap; `undefined` = no cap.

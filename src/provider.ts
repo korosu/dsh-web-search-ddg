@@ -5,10 +5,12 @@
  *
  * The DDG result links are protocol-relative redirect URLs
  * (`//duckduckgo.com/l/?uddg=<encoded>&rut=...`); this provider decodes the
- * `uddg` parameter back to the real destination so the tool consumer displays
- * and cites the actual page, not the intermediate hop. Row mapping, URL
- * handling, and the fetch-and-error path are separated so parsing can be unit
- * tested without a network.
+ * redirect parameter — `uddg` on the organic `/l/` carrier, `u3` on the
+ * sponsored `y.js` carrier — back to the real destination so the tool
+ * consumer displays and cites the actual page, not the intermediate hop.
+ * Sponsored rows are filtered out during parsing; row mapping, URL handling,
+ * and the fetch-and-error path are separated so parsing can be unit tested
+ * without a network.
  * @module @deepseek-ai/dsh-web-search-ddg/provider
  */
 
@@ -62,34 +64,57 @@ function isPositiveInteger(value: number): boolean {
 }
 
 /**
- * Extract the real destination from a DDG redirect URL, or `undefined` when the
- * value is not a usable `http(s)` URL. Accepts both protocol-relative
- * (`//duckduckgo.com/l/?uddg=...`) and absolute redirect targets, plus plain
- * absolute URLs (DDG may return direct links).
+ * Redirect hops unwrapped when a decoded target is itself a DDG redirect.
+ * A chain deeper than this is reported unusable rather than chased.
+ */
+const MAX_REDIRECT_HOPS = 3
+
+/** True for a usable `http(s)` URL string (the only schemes a citation needs). */
+function isHttpUrl(value: string): boolean {
+  return value.startsWith('http://') || value.startsWith('https://')
+}
+
+/**
+ * Extract the real destination from a DDG link, or `undefined` when the value
+ * is not a usable `http(s)` URL. Accepts protocol-relative (`//host/…`) and
+ * absolute targets, plain absolute URLs, and DDG's two redirect carriers: the
+ * organic result hop (`duckduckgo.com/l/?uddg=<encoded>`) and the sponsored
+ * hop (`duckduckgo.com/y.js?…&u3=<encoded>`, the link shape sponsored rows
+ * carry when the endpoint serves ads). A hop whose decoded target is itself a
+ * DDG redirect is unwrapped too, up to {@link MAX_REDIRECT_HOPS} levels; a
+ * deeper chain surfaces as `undefined`. The surviving destination is returned
+ * canonicalized — re-parsed through `URL` — so the consumer always receives a
+ * valid absolute URL.
  *
  * @param rawHref - the raw `href` from a result row.
  * @returns the destination, or `undefined` when nothing usable is present.
  */
 export function resolveDestination(rawHref: string): string | undefined {
-  if (rawHref.length === 0) return undefined
   let candidate = rawHref
   // Protocol-relative href: `//host/path`.
   if (candidate.startsWith('//')) candidate = `https:${candidate}`
-  if (candidate.startsWith('http://') || candidate.startsWith('https://')) {
+  if (!isHttpUrl(candidate)) return undefined
+  for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop++) {
+    let url: URL
     try {
-      // Already an absolute URL; use it as-is unless it is a DDG redirect hop.
-      const url = new URL(candidate)
-      if (url.hostname === 'duckduckgo.com' && url.pathname.startsWith('/l/')) {
-        const redirect = url.searchParams.get('uddg')
-        if (redirect !== null && (redirect.startsWith('http://') || redirect.startsWith('https://'))) {
-          return redirect
-        }
-      } else {
-        return url.toString()
-      }
+      url = new URL(candidate)
     } catch {
-      // Fall through to the shared decode below.
+      return undefined
     }
+    if (url.hostname !== 'duckduckgo.com') return url.toString()
+    if (url.pathname.startsWith('/l/')) {
+      const redirect = url.searchParams.get('uddg')
+      if (redirect === null || !isHttpUrl(redirect)) return undefined
+      candidate = redirect
+      continue
+    }
+    if (url.pathname.startsWith('/y.js')) {
+      const destination = url.searchParams.get('u3')
+      if (destination === null || !isHttpUrl(destination)) return undefined
+      candidate = destination
+      continue
+    }
+    return url.toString()
   }
   return undefined
 }
@@ -271,8 +296,11 @@ function webAborted(signal: AbortSignal | undefined, fallback: unknown): WebErro
 /**
  * Parse the DDG static results page into rows. Rows live under `#links` with
  * class `result`; the title is `a.result__a` and the snippet `a.result__snippet`.
- * `limit` bounds the number of parsed rows as a provider-side optimization when
- * present (the seam enforces the request bound regardless).
+ * Sponsored placements — rows carrying any `result--ad*` class — are skipped:
+ * they are paid positions rather than organic results, and their links point
+ * at a `y.js` tracking hop instead of a citation target. `limit` bounds the
+ * number of parsed rows as a provider-side optimization when present (the seam
+ * enforces the request bound regardless).
  *
  * @param html - the response body.
  * @param limit - optional row cap; `undefined` = no cap.
@@ -284,6 +312,8 @@ export function parseResults(html: string, limit?: number): DdgScrapeEntry[] {
   const $ = load(html)
   $('#links .result').each((_, elem) => {
     if (limit !== undefined && entries.length >= limit) return false
+    const classes = (($(elem).attr('class')) ?? '').split(/\s+/).filter(cls => cls.length > 0)
+    if (classes.some(cls => cls.startsWith('result--ad'))) return true
     const titleEl = $(elem).find('a.result__a')
     const snippetEl = $(elem).find('a.result__snippet')
     const rawHref = titleEl.attr('href') ?? ''
