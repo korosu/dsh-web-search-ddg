@@ -93,15 +93,27 @@ function sponsoredRow(): string {
       </div>`
 }
 
-/** A fetch stub that never settles on its own — only the request signal aborts it (mirrors native fetch, including an already-aborted signal). */
+/**
+ * A fetch stub that never settles on its own — only the request signal aborts
+ * it (mirrors native fetch, including an already-aborted signal). While
+ * pending it holds a ref'd keep-alive timer: `AbortSignal.timeout` timers are
+ * unref'd by design, and on the Node 22 CI leg the event loop drained before
+ * a 1ms test deadline could fire (`ERR_TEST_FAILURE: Promise resolution is
+ * still pending`), cancelling the rest of the run.
+ */
 function hangUntilAborted(): (url: string, init?: RequestInit) => Promise<Response> {
   return (_, init) => new Promise<Response>((_resolve, reject) => {
     const signal = init?.signal
+    const keepAlive = setTimeout(() => {}, 1_000)
+    const settle = (reason: unknown) => {
+      clearTimeout(keepAlive)
+      reject(reason)
+    }
     if (signal?.aborted === true) {
-      reject(signal.reason)
+      settle(signal.reason)
       return
     }
-    signal?.addEventListener('abort', () => reject(signal.reason), { once: true })
+    signal?.addEventListener('abort', () => settle(signal.reason), { once: true })
   })
 }
 

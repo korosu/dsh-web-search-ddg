@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The offline suite's hang-style fetch stubs now hold a ref'd keep-alive
+  timer while pending. `AbortSignal.timeout` timers are unref'd by design,
+  and on the Node 22 CI leg the event loop drained before a 1ms test
+  deadline could fire (`ERR_TEST_FAILURE: Promise resolution is still
+  pending`), cancelling the rest of the run. Test infrastructure only — no
+  shipped code changed.
+
 ## [0.2.0] - 2026-10-10
 
 ### Added
