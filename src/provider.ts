@@ -366,7 +366,10 @@ export class DdgSearchProvider implements WebSearchProvider {
       if (signal?.aborted === true || isAbortError(error)) throw webAborted(signal, error)
       throw this.transientFailure(`DuckDuckGo returned an unreadable response body: ${String(error)}`, error)
     }
-    this.emitRequest({ status: response.status, ms: Date.now() - startedAt, bytes: html.length })
+    // `bytes` is the UTF-8 body size, not the JS string length: for a CJK page
+    // the two differ roughly 3×, and the host log must report the real
+    // transfer size a throttling episode is judged by.
+    this.emitRequest({ status: response.status, ms: Date.now() - startedAt, bytes: Buffer.byteLength(html) })
 
     // provider-side bound on usable sources, applied after normalization so
     // junk rows cannot push usable ones past the cut; the seam caps regardless.

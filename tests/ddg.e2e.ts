@@ -8,8 +8,11 @@ import { DdgSearchProvider, DDG_DEFAULT_ENDPOINT } from '../src/provider.ts'
  * Real-network smoke for the DuckDuckGo scrape provider. Self-skips unless
  * `DDG_E2E=1` so ordinary `pnpm test` never depends on the network or on DDG's
  * rate limiting. The cases cover the query shapes the endpoint sees in
- * practice: plain ASCII, Cyrillic (non-ASCII percent-encoding), operators and
- * special characters, the `site:` filter, a provider-side result cap, and a
+ * practice: plain ASCII, Cyrillic (non-ASCII percent-encoding), Chinese —
+ * simplified, traditional, and mixed with ASCII, plus a Chinese
+ * `accept-language` header (the plugin ships a Chinese README, so a
+ * Chinese-language audience is first-class) — operators and special
+ * characters, the `site:` filter, a provider-side result cap, and a
  * no-results query that must stay a well-formed answer rather than an error.
  *
  * DDG challenges rapid bursts from one IP with an HTTP 202 anomaly page, so
@@ -106,6 +109,35 @@ maybe('DdgSearchProvider real network', () => {
     const result = await liveSearch(t, newProvider(), { query: 'python учебник для начинающих', maxResults: 5 })
     if (result === undefined) return
     assert.ok(result.sources.length > 0, 'expected at least one Cyrillic-query source')
+    expectWellFormed(result)
+  })
+
+  it('percent-encodes a simplified-Chinese query and returns sources', { timeout: 60_000 }, async t => {
+    const result = await liveSearch(t, newProvider(), { query: '中文搜索 深度学习', maxResults: 5 })
+    if (result === undefined) return
+    assert.ok(result.sources.length > 0, 'expected at least one simplified-Chinese-query source')
+    expectWellFormed(result)
+  })
+
+  it('percent-encodes a traditional-Chinese query and returns sources', { timeout: 60_000 }, async t => {
+    const result = await liveSearch(t, newProvider(), { query: '繁體中文 搜尋引擎', maxResults: 5 })
+    if (result === undefined) return
+    assert.ok(result.sources.length > 0, 'expected at least one traditional-Chinese-query source')
+    expectWellFormed(result)
+  })
+
+  it('handles a mixed CJK + ASCII query', { timeout: 60_000 }, async t => {
+    const result = await liveSearch(t, newProvider(), { query: 'Python 3 中文教程', maxResults: 5 })
+    if (result === undefined) return
+    assert.ok(result.sources.length > 0, 'expected at least one mixed-script-query source')
+    expectWellFormed(result)
+  })
+
+  it('serves a Chinese query with a Chinese accept-language header configured', { timeout: 60_000 }, async t => {
+    const provider = new DdgSearchProvider({ endpoint: DDG_DEFAULT_ENDPOINT, acceptLanguage: 'zh-CN,zh;q=0.9' })
+    const result = await liveSearch(t, provider, { query: '中文搜索', maxResults: 5 })
+    if (result === undefined) return
+    assert.ok(result.sources.length > 0, 'expected at least one source with the Chinese accept-language header')
     expectWellFormed(result)
   })
 

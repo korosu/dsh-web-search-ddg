@@ -74,7 +74,7 @@
     "build": "tsc -p tsconfig.json",
     "prepack": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --experimental-test-isolation=none --test tests/ddg.spec.ts tests/ddg.e2e.ts",
+    "test": "node --experimental-test-isolation=none --test tests/ddg.spec.ts tests/ddg.cjk.spec.ts tests/ddg.e2e.ts",
     "test:e2e": "node --experimental-test-isolation=none --test tests/ddg.e2e.ts",
     "compat": "bash scripts/compat-matrix.sh"
   }

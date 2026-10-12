@@ -6,7 +6,8 @@
 # then runs three checks:
 #
 #   1. typecheck src/ against that version's type declarations,
-#   2. run the offline contract suite (tests/ddg.spec.ts) against that seam,
+#   2. run the offline contract suites (tests/ddg.spec.ts and
+#      tests/ddg.cjk.spec.ts) against that seam,
 #   3. install this plugin's packed tarball and run `pnpm peers check`,
 #      which reports whether the version is inside the peer range that
 #      package.json currently claims.
@@ -85,7 +86,7 @@ EOF
     contract=no
     cat typecheck.log
   fi
-  if ! pnpm exec node --experimental-test-isolation=none --test tests/ddg.spec.ts \
+  if ! pnpm exec node --experimental-test-isolation=none --test tests/ddg.spec.ts tests/ddg.cjk.spec.ts \
       >suite.log 2>&1; then
     contract=no
     tail -n 20 suite.log

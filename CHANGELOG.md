@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The log event's `bytes` field now reports the response body's UTF-8 byte
+  size (`Buffer.byteLength(html)`) instead of its JS string length. For a CJK
+  page the two differ roughly 3×, so the transfer size visible in host logs
+  during a throttling episode was badly understated.
+
+### Added
+
+- CJK coverage: `tests/ddg.cjk.spec.ts` (16 offline tests) drives the whole
+  path a Chinese query travels — query percent-encoding (simplified,
+  traditional, mixed CJK + ASCII, full-width punctuation, astral CJK
+  Extension-B, emoji), response parsing of numeric and named HTML entities,
+  CJK titles and snippets, redirect decoding (percent-encoded, raw, and IDN
+  Chinese URLs), a Chinese `accept-language` header, and CJK byte accounting.
+  The live e2e file grew four matching Chinese queries.
+
+### Fixed
+
 - The offline suite's hang-style fetch stubs now hold a ref'd keep-alive
   timer while pending. `AbortSignal.timeout` timers are unref'd by design,
   and on the Node 22 CI leg the event loop drained before a 1ms test

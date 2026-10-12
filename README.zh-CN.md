@@ -165,8 +165,8 @@ HTTP 重定向由原生 fetch 跟随，因为端点会在裸域与 `html/` 路�
 | dsh 发布 | 验证内容 |
 | --- | --- |
 | `0.2.0-rc.1` | 完整路径：通过 `dsh plugin add` 装进真实 profile、启动、并回答真实查询 |
-| `0.2.0-rc.2` | 契约套件（typecheck + 73 个离线测试）对该 seam，经 `pnpm compat` |
-| `0.2.1-alpha.1` | 契约套件（typecheck + 73 个离线测试）对该 seam，经 `pnpm compat` |
+| `0.2.0-rc.2` | 契约套件（typecheck + 89 个离线测试）对该 seam，经 `pnpm compat` |
+| `0.2.1-alpha.1` | 契约套件（typecheck + 89 个离线测试）对该 seam，经 `pnpm compat` |
 
 semver 的预发布规则带来两个影响，直接决定了声明长什么样：
 
@@ -214,7 +214,7 @@ semver 的预发布规则带来两个影响，直接决定了声明长什么样�
 
 ```bash
 pnpm install
-pnpm test          # 单元 + 集成，离线（fetch 被 stub）；73 个测试
+pnpm test          # 单元 + 集成，离线（fetch 被 stub）；89 个测试
 DDG_E2E=1 pnpm test:e2e   # 真实网络 smoke；未设标志时自跳过
 pnpm typecheck
 pnpm peers check   # 针对已安装 seam 线的 peer 范围自检
@@ -223,6 +223,8 @@ pnpm build         # 通过 tsc 产出 lib/
 ```
 
 CI 在每次 push 与 pull request 上运行同一套离线检查（`typecheck`、`test`、`peers check`、`build`），并在重新构建使已提交的 `lib/` 与 `src/` 产生差异时失败，因此过期的预构建产物不可能落进 `main`。
+
+离线集合包含 CJK 覆盖（`tests/ddg.cjk.spec.ts`）：简体、繁体、中英混排、全角、CJK 扩展 B 与 emoji 查询，覆盖查询编码、响应解析、重定向解码、请求头与字节计量各条路径——全部离线，`fetch` 被 stub。
 
 集成测试把真实插件挂载进真实的 `@deepseek-ai/cordis` `Context`，使用真实的 `@deepseek-ai/dsh-web` `WebRuntime`，只 stub `globalThis.fetch`，并同时断言成功选择与 HMR 安全的反注册。dev 依赖固定被测的那条 seam 线：`@deepseek-ai/dsh-web@0.2.0-rc.1` 配 `@deepseek-ai/cordis ~4.0.4` 与 `@deepseek-ai/schemastery ~3.18.4`，与 dsh 0.2.0-rc.1 发布所带一致（见开发备注中关于 dsh peer 范围的一节）。`lib/` 已纳入版本控制，因此本地路径安装永远无需构建；重新打包 tarball 前请运行 `pnpm build`。
 

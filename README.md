@@ -165,8 +165,8 @@ The package claims dsh releases carrying `@deepseek-ai/dsh-web` `^0.2.0-rc.1 || 
 | dsh release | What was verified |
 | --- | --- |
 | `0.2.0-rc.1` | Full path: installed through `dsh plugin add` into a real profile, booted, and answering live queries |
-| `0.2.0-rc.2` | Contract suite (typecheck + 73 offline tests) against that seam, via `pnpm compat` |
-| `0.2.1-alpha.1` | Contract suite (typecheck + 73 offline tests) against that seam, via `pnpm compat` |
+| `0.2.0-rc.2` | Contract suite (typecheck + 89 offline tests) against that seam, via `pnpm compat` |
+| `0.2.1-alpha.1` | Contract suite (typecheck + 89 offline tests) against that seam, via `pnpm compat` |
 
 Two consequences of semver prerelease rules shape the declared range:
 
@@ -216,7 +216,7 @@ The dev dependencies pin the seam line under test: `@deepseek-ai/dsh-web@0.2.0-r
 
 ```bash
 pnpm install
-pnpm test          # unit + integration, offline (fetch stubbed); 73 tests
+pnpm test          # unit + integration, offline (fetch stubbed); 89 tests
 DDG_E2E=1 pnpm test:e2e   # real-network smoke; self-skips without the flag
 pnpm typecheck
 pnpm peers check   # peer-range sanity against the installed seam line
@@ -225,6 +225,8 @@ pnpm build         # emits lib/ via tsc
 ```
 
 CI runs the same offline set on every push and pull request (`typecheck`, `test`, `peers check`, `build`) and fails if a rebuild makes the committed `lib/` differ from `src/`, so a stale prebuilt artifact can never land on `main`.
+
+The offline set includes CJK coverage (`tests/ddg.cjk.spec.ts`): simplified, traditional, mixed-script, full-width, astral, and emoji queries against the query-encoding, response-parsing, redirect-decoding, header, and byte-accounting paths — all offline with `fetch` stubbed.
 
 The integration tests mount the real plugin into a real `@deepseek-ai/cordis` `Context` with the real `@deepseek-ai/dsh-web` `WebRuntime`, stub only `globalThis.fetch`, and assert both the successful selection and the HMR-safe unregistration. `lib/` is committed so a local path install never needs to build; run `pnpm build` before repacking a tarball.
 
