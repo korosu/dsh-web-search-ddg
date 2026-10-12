@@ -29,3 +29,6 @@ Thumbs.db
 
 # NOTE: lib/ is intentionally NOT ignored. It ships prebuilt (see README,
 # "The build-script catch") and CI verifies it stays in sync with src/.
+
+# local self-test scratch (DSH_HOME for install verification)
+.selftest-home/
