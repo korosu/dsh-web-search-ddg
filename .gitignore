@@ -32,3 +32,5 @@ Thumbs.db
 
 # local self-test scratch (DSH_HOME for install verification)
 .selftest-home/
+
+docs/*
