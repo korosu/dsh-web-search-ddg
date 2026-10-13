@@ -15,16 +15,13 @@ import { DdgSearchProvider, DDG_DEFAULT_ENDPOINT } from '../src/provider.ts'
  * characters, the `site:` filter, a provider-side result cap, and a
  * no-results query that must stay a well-formed answer rather than an error.
  *
- * DDG challenges rapid bursts from one IP with an HTTP 202 anomaly page, so
- * the live queries are paced 10s apart, exercising result parsing rather
- * than the throttle path. The challenge is also issued intermittently to a
- * single request while its neighbors are served, so a lone anomaly is
- * retried once after a full gap. When the retry draws the anomaly again the
- * endpoint is persistently challenging this client — an environment
- * condition (throttling, datacenter filtering, or query-language policy),
- * not a provider defect — and the case self-skips with that reason; the
- * anomaly contract itself is pinned by the unit tests. Any other error,
- * and any assertion over a served page, still fails the run.
+ * DDG challenges clients with an HTTP 202 anomaly page, so the live queries
+ * are paced 10s apart, exercising result parsing rather than the throttle
+ * path. A single challenged request is **not** retried — a retried
+ * bot-flagged request lowers the IP's reputation (searxng PR #2829, #3955) —
+ * so the case self-skips with the reason; the anomaly contract itself is
+ * pinned by the unit tests. Any other error, and any assertion over a served
+ * page, still fails the run.
  */
 const maybe = process.env.DDG_E2E === '1' ? describe : describe.skip
 
@@ -40,11 +37,14 @@ function newProvider(): DdgSearchProvider {
   return new DdgSearchProvider({ endpoint: DDG_DEFAULT_ENDPOINT })
 }
 
-/** True for the provider's anomaly-page error — DDG's intermittent challenge. */
+/**
+ * True for the provider's challenge-page errors — the anomaly page and the
+ * bot challenge form, whichever marker the live body carried.
+ */
 function isAnomalyError(error: unknown): boolean {
   return error instanceof Error
     && (error as Error & { code?: string }).code === 'WEB_PROVIDER_ERROR'
-    && error.message.includes('anomaly page')
+    && (error.message.includes('anomaly page') || error.message.includes('bot challenge page'))
 }
 
 /** Wait out the pacing gap, then stamp the query clock. */
@@ -55,12 +55,13 @@ async function paceGap(): Promise<void> {
 }
 
 /**
- * Run one paced live query. A lone 202 anomaly page is DDG's intermittent
- * per-request challenge, so it is retried once after a full pacing gap; a
- * second consecutive anomaly means the endpoint is persistently challenging
- * this client, and the case self-skips with the reason instead of failing —
- * the suite must assert parsing over served pages, not police DDG's
- * network-side policies (the anomaly contract is unit-tested).
+ * Run one paced live query. A challenge page — the HTTP 202 anomaly or any
+ * status whose body carries the challenge form — is DDG challenging this
+ * client; one request, no retry. Retrying a bot-flagged request is itself a
+ * bot signal that lowers the IP's reputation (searxng PR #2829 and #3955),
+ * so the case self-skips with the reason instead of hammering: the suite
+ * must assert parsing over served pages, not police DDG's network-side
+ * policies (the anomaly contract is unit-tested).
  *
  * @returns the served result, or `undefined` after marking the case skipped.
  */
@@ -74,16 +75,7 @@ async function liveSearch(
     return await provider.search(request)
   } catch (error) {
     if (!isAnomalyError(error)) throw error
-    // The failed attempt (possibly tarpitted for ~10s) consumed no gap;
-    // restart the clock so the retry is a full PACING_MS away.
-    lastQueryAt = Date.now()
-  }
-  await paceGap()
-  try {
-    return await provider.search(request)
-  } catch (error) {
-    if (!isAnomalyError(error)) throw error
-    t.skip('DuckDuckGo answered with the anomaly page twice; the endpoint is persistently throttling or challenging this client (environment condition, not a provider defect)')
+    t.skip('DuckDuckGo answered with a challenge page (anomaly or challenge form, no results markup); the endpoint is throttling or challenging this client — one attempt, no retry (a retried bot-flagged request lowers IP reputation: searxng PR #2829, #3955)')
     return undefined
   }
 }

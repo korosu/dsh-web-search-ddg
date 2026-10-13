@@ -116,11 +116,12 @@ export declare function mapEntries(entries: readonly DdgScrapeEntry[], limit?: n
  * of fetched.
  *
  * Failures are split in two. Transport failures, unreadable bodies, HTTP 429 /
- * 403 / 5xx, and an anomaly page (HTTP 202 carrying no result markup) are
- * *transient*: they count toward a failure budget, and once the budget is spent
- * the provider reports itself unavailable for a cooldown so the seam can pick
- * another backend instead of failing every call. Any other 4xx is a
- * configuration error, fails identically on every retry, and is never counted.
+ * 403 / 5xx, and a challenge page (the HTTP 202 anomaly, or any status whose
+ * body carries the challenge form) are *transient*: they count toward a
+ * failure budget, and once the budget is spent the provider reports itself
+ * unavailable for a cooldown so the seam can pick another backend instead of
+ * failing every call. Any other 4xx is a configuration error, fails
+ * identically on every retry, and is never counted.
  *
  * Every request carries a deadline (`timeoutMs`, default 30s) composed with the
  * caller's abort signal through `AbortSignal.any`: a caller abort still maps to
@@ -171,6 +172,16 @@ export declare class DdgSearchProvider implements WebSearchProvider {
  * @param html - the response body.
  */
 export declare function hasResultContainer(html: string): boolean;
+/**
+ * True when the page is DDG's bot challenge rather than a results page. The
+ * markers are the challenge form's `id` and the apology line it renders, the
+ * same pair searxng matches on. The check is status-independent: the
+ * challenge has been observed served under 200 as well as 202, so a status
+ * check alone under-detects it.
+ *
+ * @param html - the response body.
+ */
+export declare function isChallengePage(html: string): boolean;
 /**
  * Parse the DDG static results page into rows. Rows live under `#links` with
  * class `result`; the title is `.result__a` and the snippet `.result__snippet`

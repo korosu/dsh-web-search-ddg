@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Challenge-page detection no longer depends on the HTTP status alone: the
+  response body is now also checked for DuckDuckGo's challenge markers
+  (the `challenge-form` element id and the "Unfortunately, bots use
+  DuckDuckGo too" line) — the same pair searxng matches on. The challenge
+  has been served under 200 as well as 202, so a status-only check
+  under-detected it and mislabeled a served challenge as a markup change.
+  The thrown message now names the cause ("bot challenge page") instead of
+  the generic "no results markup at all".
+
+### Changed
+
+- The live e2e suite no longer retries a challenged request. Retrying a
+  bot-flagged request is itself a bot signal that lowers the IP's
+  reputation (searxng PR #2829, #3955); each live query now makes exactly
+  one attempt and self-skips with the reason when challenged.
+
 ### Fixed
 
 - The log event's `bytes` field now reports the response body's UTF-8 byte

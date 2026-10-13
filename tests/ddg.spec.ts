@@ -6,6 +6,7 @@ import {
   DdgSearchProvider,
   DDG_PROVIDER_ID,
   hasResultContainer,
+  isChallengePage,
   mapEntries,
   parseResults,
   resolveDestination,
@@ -313,6 +314,14 @@ describe('parseResults', () => {
     assert.equal(hasResultContainer('<div class="no-results">none</div>'), false)
     assert.equal(hasResultContainer(''), false)
   })
+
+  it('detects the challenge page by form id or apology line, status-independently', () => {
+    assert.equal(isChallengePage('<form id="challenge-form"></form>'), true)
+    assert.equal(isChallengePage("<form id='challenge-form'></form>"), true)
+    assert.equal(isChallengePage('<p>Unfortunately, bots use DuckDuckGo too.</p>'), true)
+    assert.equal(isChallengePage('<div id="links"><div class="result"></div></div>'), false)
+    assert.equal(isChallengePage(''), false)
+  })
 })
 
 describe('DdgSearchProvider availability', () => {
@@ -516,6 +525,27 @@ describe('DdgSearchProvider error handling', () => {
     await assert.rejects(
       new DdgSearchProvider(options).search({ query: 'q' }),
       rejectsWithCode('WEB_PROVIDER_ERROR', /anomaly page/),
+    )
+  })
+
+  it('detects a challenge page by its body markers, whatever the status', async () => {
+    // searxng matches the challenge by status OR body markers — the challenge
+    // form has been served under 200 too, so the status alone under-detects.
+    for (const status of [200, 202]) {
+      stubFetch(async () => new Response('<html><body><form id="challenge-form"></form></body></html>', { status }))
+      await assert.rejects(
+        new DdgSearchProvider(options).search({ query: 'q' }),
+        rejectsWithCode('WEB_PROVIDER_ERROR', /bot challenge page/),
+        `expected status ${status} to be detected as a challenge`,
+      )
+    }
+  })
+
+  it('detects a challenge page by its apology line too', async () => {
+    stubFetch(async () => new Response('<html><body>Unfortunately, bots use DuckDuckGo too.</body></html>', { status: 200 }))
+    await assert.rejects(
+      new DdgSearchProvider(options).search({ query: 'q' }),
+      rejectsWithCode('WEB_PROVIDER_ERROR', /bot challenge page/),
     )
   })
 
